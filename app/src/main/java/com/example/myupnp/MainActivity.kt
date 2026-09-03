@@ -58,6 +58,10 @@ class MainActivity : AppCompatActivity() {
         override fun onEngineError(error: Throwable) {
             mainHandler.post { appendLog("!! 引擎错误: ${error.message}") }
         }
+
+        override fun onSsdpInfo(info: String) {
+            mainHandler.post { appendLog("  · $info") }
+        }
     })
 
     private var multicastLock: WifiManager.MulticastLock? = null
@@ -78,6 +82,18 @@ class MainActivity : AppCompatActivity() {
     private val entries = LinkedHashMap<String, Entry>()
     private val displayRows = ArrayList<String>()
     private lateinit var adapter: ArrayAdapter<String>
+
+    /** 列表刷新合并：消息风暴时每帧最多真正刷新一次 */
+    private var refreshQueued = false
+
+    /** 日志节流：同一类报文(类型+USN)在 LOG_COOLDOWN_MS 内只打印一次，防止刷屏 */
+    private val logCooldown = HashMap<String, Long>()
+
+    /** 日志缓冲：先攒在内存里，定时批量刷一次 TextView，避免每条都触发整段文本重排（会卡死主线程） */
+    private val logBuffer = StringBuilder()
+
+    /** 是否已排队一次日志 flush */
+    private var logFlushPending = false
 
     private val fetchExecutor = Executors.newSingleThreadExecutor { r ->
         Thread(r, "description-fetch").apply { isDaemon = true }
@@ -128,9 +144,11 @@ class MainActivity : AppCompatActivity() {
         }
         btnStop.setOnClickListener { stopScanning() }
         findViewById<Button>(R.id.btnClear).setOnClickListener {
+            logBuffer.setLength(0)
+            logFlushPending = false
             tvLog.text = ""
             entries.clear()
-            refreshDeviceList()
+            requestRefresh()
         }
 
         appendLog("=== MyUPNP 控制点启动 ===")
@@ -186,7 +204,21 @@ class MainActivity : AppCompatActivity() {
     // 处理收到的 SSDP 消息（主线程）
     // ------------------------------------------------------------------
     private fun handleSsdpMessage(message: com.example.myupnp.ssdp.SsdpMessage) {
-        appendLog(formatSsdpMessage(message))
+        // 日志节流：同样的(类型+USN)消息 10 秒内只打印一次
+        val logKey = "${message.type}|${message.usn ?: message.location ?: message.sourceHost}"
+        val nowMs = System.currentTimeMillis()
+        val lastShown = logCooldown[logKey] ?: 0L
+        if (nowMs - lastShown >= LOG_COOLDOWN_MS) {
+            logCooldown[logKey] = nowMs
+            if (logCooldown.size > 512) {
+                val it = logCooldown.entries.iterator()
+                while (logCooldown.size > 256 && it.hasNext()) {
+                    it.next()
+                    it.remove()
+                }
+            }
+            appendLog(formatSsdpMessage(message))
+        }
 
         when (message.type) {
             SsdpMessageType.SEARCH_RESPONSE,
@@ -208,7 +240,7 @@ class MainActivity : AppCompatActivity() {
             fetchDescription(it)
         }
         if (entry.usn == null) entry.usn = message.usn
-        refreshDeviceList()
+        requestRefresh()
     }
 
     /** 设备下线：按 USN 前缀匹配（同一 uuid 可能有多个 USN 后缀）移除 */
@@ -226,7 +258,7 @@ class MainActivity : AppCompatActivity() {
                 appendLog("-- 设备下线，移除: ${location}")
             }
         }
-        if (removed) refreshDeviceList()
+        if (removed) requestRefresh()
     }
 
     /** 后台线程拉取 description.xml，成功后回主线程更新 */
@@ -247,8 +279,18 @@ class MainActivity : AppCompatActivity() {
                     live.failed = true
                     appendLog("!! 描述拉取失败: $location")
                 }
-                refreshDeviceList()
+                requestRefresh()
             }
+        }
+    }
+
+    /** 合并列表刷新：同帧内多次请求只刷一次（设备多时消息很密集） */
+    private fun requestRefresh() {
+        if (refreshQueued) return
+        refreshQueued = true
+        mainHandler.post {
+            refreshQueued = false
+            refreshDeviceList()
         }
     }
 
@@ -279,14 +321,27 @@ class MainActivity : AppCompatActivity() {
     }
 
     // ------------------------------------------------------------------
-    // 日志（滚动到最新；限制长度防止长时间运行内存膨胀）
+    // 日志（缓冲 + 定时批量刷新到 TextView）
+    // 千万不要逐条 tvLog.append()：TextView 每 append/setText 一次都要对整个
+    // 文本重新布局，日志一长（哪怕几千行）主线程就会被拖死导致"无响应"。
     // ------------------------------------------------------------------
     private fun appendLog(line: String) {
-        tvLog.append(line + "\n")
-        val text = tvLog.text
-        if (text.length > MAX_LOG_CHARS) {
-            tvLog.text = text.substring(text.length - MAX_LOG_CHARS)
+        logBuffer.append(line).append('\n')
+        // 只保留尾部 MAX_LOG_CHARS 字符，防止日志无限增长
+        if (logBuffer.length > MAX_LOG_CHARS * 2) {
+            logBuffer.delete(0, logBuffer.length - MAX_LOG_CHARS)
         }
+        if (!logFlushPending) {
+            logFlushPending = true
+            mainHandler.postDelayed({ flushLog() }, LOG_FLUSH_MS)
+        }
+    }
+
+    /** 把缓冲里的日志一次性刷到界面（节流后每秒最多 LOG_FLUSH_MS 一次） */
+    private fun flushLog() {
+        logFlushPending = false
+        if (logBuffer.isEmpty()) return
+        tvLog.text = logBuffer.toString()
         scrollLog.post { scrollLog.fullScroll(ScrollView.FOCUS_DOWN) }
     }
 
@@ -306,6 +361,13 @@ class MainActivity : AppCompatActivity() {
     }
 
     companion object {
-        private const val MAX_LOG_CHARS = 200_000
+        /** 日志最多保留的尾部字符数（内存缓冲按 2 倍裁剪，界面最多显示这么多） */
+        private const val MAX_LOG_CHARS = 60_000
+
+        /** 相同报文(类型+USN)的最短打印间隔，防止设备多的局域网刷屏 */
+        private const val LOG_COOLDOWN_MS = 10_000L
+
+        /** 日志批量刷屏周期：攒够这段时间的日志再一次写到 TextView */
+        private const val LOG_FLUSH_MS = 350L
     }
 }

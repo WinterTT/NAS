@@ -38,6 +38,14 @@
 > **踩坑经验（Android）**：默认 Wi-Fi 网卡在硬件/驱动层就把组播帧丢了，必须
 > `WifiManager.createMulticastLock().acquire()` 才能收到组播；socket 要
 > `setReuseAddress(true)` 以和别的 UPnP 程序共用 1900 端口；网络 IO 一律后台线程。
+>
+> **再补一个大坑（实测踩到）**：M-SEARCH 不能从"绑定了 1900 端口的 socket"发出去！
+> 设备应答是**单播回给 M-SEARCH 包的源 IP:源端口**的，如果源端口正好是 1900，
+> 在 Windows 上应答会被系统 SSDP 服务/防火墙拦掉，在部分 Android（含 MIUI/HyperOS）
+> 环境也收不到 —— 表现为"扫不到任何设备"，但 PC 上用临时端口裸发 M-SEARCH 却能收到
+> 一堆应答。正确姿势（本仓库 `SsdpDiscovery` 已按此实现）：
+>   1) 用一个绑**临时端口**的 socket 发 M-SEARCH、收单播应答（这是 UPnP 控制点惯例）；
+>   2) 另开一个尽量绑 1900 的组播 socket 专门收设备主动广播的 NOTIFY（绑不上就退化）。
 
 ### 1.3 设备描述（description.xml）
 
