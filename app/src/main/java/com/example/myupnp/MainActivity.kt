@@ -1,6 +1,7 @@
 package com.example.myupnp
 
 import android.Manifest
+import android.app.AlertDialog
 import android.content.Context
 import android.content.pm.PackageManager
 import android.net.wifi.WifiManager
@@ -10,6 +11,8 @@ import android.os.Handler
 import android.os.Looper
 import android.widget.ArrayAdapter
 import android.widget.Button
+import android.widget.EditText
+import android.widget.LinearLayout
 import android.widget.ListView
 import android.widget.ScrollView
 import android.widget.TextView
@@ -21,7 +24,11 @@ import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import com.example.myupnp.device.DeviceDescriptionLoader
+import com.example.myupnp.device.ScpdLoader
+import com.example.myupnp.model.UpnpAction
 import com.example.myupnp.model.UpnpDevice
+import com.example.myupnp.model.UpnpService
+import com.example.myupnp.soap.SoapCaller
 import com.example.myupnp.ssdp.SsdpDiscovery
 import com.example.myupnp.ssdp.SsdpMessageType
 import java.net.URL
@@ -99,6 +106,11 @@ class MainActivity : AppCompatActivity() {
         Thread(r, "description-fetch").apply { isDaemon = true }
     }
 
+    /** SCPD/SOAP 控制请求的线程池（与描述抓取分开，避免互相排队拖慢） */
+    private val controlExecutor = Executors.newSingleThreadExecutor { r ->
+        Thread(r, "soap-control").apply { isDaemon = true }
+    }
+
     // ---- Android 13+ 需要运行时申请 NEARBY_WIFI_DEVICES ----
     private val nearbyPermissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
@@ -129,6 +141,17 @@ class MainActivity : AppCompatActivity() {
 
         adapter = ArrayAdapter(this, android.R.layout.simple_list_item_1, displayRows)
         listDevices.adapter = adapter
+
+        // ---- 第 2 课：点设备 -> 选择要操作的服务（AVTransport/RenderingControl…） ----
+        listDevices.setOnItemClickListener { _, _, position, _ ->
+            val entry = entries.values.elementAtOrNull(position) ?: return@setOnItemClickListener
+            val device = entry.device
+            if (device == null) {
+                Toast.makeText(this, "设备描述还没加载成功，无法操作", Toast.LENGTH_SHORT).show()
+                return@setOnItemClickListener
+            }
+            showServicePicker(entry, device)
+        }
 
         btnStart.setOnClickListener {
             if (discovery.isRunning()) return@setOnClickListener
@@ -197,6 +220,7 @@ class MainActivity : AppCompatActivity() {
         }
         multicastLock = null
         fetchExecutor.shutdownNow()
+        controlExecutor.shutdownNow()
         super.onDestroy()
     }
 
@@ -295,6 +319,140 @@ class MainActivity : AppCompatActivity() {
     }
 
     // ------------------------------------------------------------------
+    // 第 2 课：SOAP 控制流程（全部在主线程弹 UI，网络请求丢给 controlExecutor）
+    // ------------------------------------------------------------------
+
+    /** 1) 选择设备里的一个服务 */
+    private fun showServicePicker(entry: Entry, device: UpnpDevice) {
+        if (device.services.isEmpty()) {
+            Toast.makeText(this, "该设备没有可控制的服务", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val names = device.services.map { shortServiceName(it) }
+        AlertDialog.Builder(this)
+            .setTitle("${device.friendlyName} — 选择服务")
+            .setItems(names.toTypedArray()) { _, which ->
+                showActionPicker(entry, device.services[which])
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    /** 2) 拉取该服务的 SCPD，列出所有可用动作 */
+    private fun showActionPicker(entry: Entry, service: UpnpService) {
+        if (service.scpdUrl.isBlank()) {
+            Toast.makeText(this, "该服务没有 SCPDURL", Toast.LENGTH_SHORT).show()
+            return
+        }
+        appendLog(">> 拉取 SCPD(${shortServiceName(service)}): ${service.scpdUrl}")
+        controlExecutor.execute {
+            val actions = ScpdLoader.load(service.scpdUrl)
+            mainHandler.post {
+                if (actions.isEmpty()) {
+                    appendLog("!! SCPD 解析失败或没有动作: ${service.scpdUrl}")
+                    Toast.makeText(this, "SCPD 为空或解析失败", Toast.LENGTH_SHORT).show()
+                    return@post
+                }
+                appendLog("  共 ${actions.size} 个动作:")
+                actions.forEach { appendLog("    · ${it.signature()}") }
+                AlertDialog.Builder(this)
+                    .setTitle("${shortServiceName(service)} — 选择动作")
+                    .setItems(actions.map { it.signature() }.toTypedArray()) { _, which ->
+                        showArgumentInput(entry, service, actions[which])
+                    }
+                    .setNegativeButton("取消", null)
+                    .show()
+            }
+        }
+    }
+
+    /** 3) 给动作填 in 参数（常见参数预填默认值），点"调用"发 SOAP */
+    private fun showArgumentInput(
+        entry: Entry,
+        service: UpnpService,
+        action: UpnpAction
+    ) {
+        if (action.inArguments.isEmpty()) {
+            doSoapCall(entry, service, action, emptyMap())
+            return
+        }
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(60, 20, 60, 0)
+        }
+        val edits = LinkedHashMap<String, EditText>()
+        for (arg in action.inArguments) {
+            val label = TextView(this).apply {
+                text = "${arg.name} (in)"
+                textSize = 14f
+            }
+            container.addView(label)
+            val input = EditText(this).apply {
+                hint = "值 (${arg.relatedStateVariable})"
+                setText(DEFAULT_ARGS[arg.name] ?: "")
+            }
+            container.addView(input)
+            edits[arg.name] = input
+        }
+        AlertDialog.Builder(this)
+            .setTitle("调用 ${action.name} @ ${shortServiceName(service)}")
+            .setView(container)
+            .setPositiveButton("调用") { _, _ ->
+                val args = edits.mapValues { it.value.text.toString().trim() }
+                doSoapCall(entry, service, action, args)
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    /** 4) 真正发 SOAP 请求，结果打进协议日志 */
+    private fun doSoapCall(
+        entry: Entry,
+        service: UpnpService,
+        action: UpnpAction,
+        args: Map<String, String>
+    ) {
+        if (service.controlUrl.isBlank()) {
+            Toast.makeText(this, "该服务没有 controlURL", Toast.LENGTH_SHORT).show()
+            return
+        }
+        appendLog(
+            ">> SOAP 调用 ${action.name} @ ${service.controlUrl}  参数=$args " +
+                "SOAPACTION=\"${service.serviceType}#${action.name}\""
+        )
+        controlExecutor.execute {
+            val result = SoapCaller.call(service.controlUrl, service.serviceType, action.name, args)
+            mainHandler.post {
+                appendLog("<< 响应 http=${result.httpCode} success=${result.success}")
+                if (result.success) {
+                    appendLog("   响应体: ${result.body.take(600)}")
+                    Toast.makeText(
+                        this,
+                        "${action.name} 调用成功（设备已受理）",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                } else {
+                    appendLog("   调用失败: ${result.summary()}")
+                    appendLog("   错误体片段: ${result.body.take(600)}")
+                    Toast.makeText(
+                        this,
+                        "${action.name} 失败: ${result.upnpErrorDesc.take(60)}",
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
+            }
+        }
+    }
+
+    /** 服务显示名：serviceId 最后一段（如 AVTransport） */
+    private fun shortServiceName(s: UpnpService): String {
+        val fromId = s.serviceId.substringAfterLast(':')
+        if (fromId.isNotBlank()) return fromId
+        val fromType = s.serviceType.substringAfter(":service:").substringBefore(":")
+        return fromType.ifBlank { s.serviceType }
+    }
+
+    // ------------------------------------------------------------------
     // UI 刷新
     // ------------------------------------------------------------------
     private fun refreshDeviceList() {
@@ -369,5 +527,12 @@ class MainActivity : AppCompatActivity() {
 
         /** 日志批量刷屏周期：攒够这段时间的日志再一次写到 TextView */
         private const val LOG_FLUSH_MS = 350L
+
+        /** 填参数时预填的常见默认值（DLNA 媒体设备几乎都长这样） */
+        private val DEFAULT_ARGS = mapOf(
+            "InstanceID" to "0",   // AVTransport/RenderingControl 的实例号
+            "Speed" to "1",        // Play 的播放速度
+            "Channel" to "Master"  // RenderingControl 的音量通道
+        )
     }
 }

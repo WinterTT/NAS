@@ -59,11 +59,32 @@ object DeviceDescriptionLoader {
 
         return try {
             if (connection.responseCode != HttpURLConnection.HTTP_OK) null
-            else connection.inputStream.use { input -> parseDeviceXml(input) }
+            else connection.inputStream.use { input ->
+                val device = parseDeviceXml(input) ?: return null
+                // 把服务里的相对 URL（很多设备写 /upnp/control/xxx）解析成
+                // 基于 LOCATION 的绝对地址，供后续 SOAP/GENA 直接使用
+                device.copy(services = device.services.map { svc ->
+                    svc.copy(
+                        scpdUrl = resolve(location, svc.scpdUrl),
+                        controlUrl = resolve(location, svc.controlUrl),
+                        eventSubUrl = resolve(location, svc.eventSubUrl)
+                    )
+                })
+            }
         } catch (_: Exception) {
             null
         } finally {
             connection.disconnect()
+        }
+    }
+
+    /** 相对地址 -> 绝对地址：以描述文档的 LOCATION 为基准 */
+    private fun resolve(baseUrl: String, url: String): String {
+        if (url.isEmpty()) return ""
+        return try {
+            URL(URL(baseUrl), url).toString()
+        } catch (_: Exception) {
+            url // 解析失败就用原始值
         }
     }
 
