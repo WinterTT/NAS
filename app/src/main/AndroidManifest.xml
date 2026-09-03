@@ -2,6 +2,21 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
+    <!-- ======= UPnP / SSDP 需要的网络权限 =======
+         1. INTERNET：HTTP 拉取设备描述
+         2. ACCESS_NETWORK_STATE / ACCESS_WIFI_STATE：判断网卡
+         3. CHANGE_WIFI_MULTICAST_STATE：Wi-Fi 默认丢弃组播帧，
+            需要 MulticastLock 才能收到 SSDP 组播包
+         4. NEARBY_WIFI_DEVICES(Android 13+)：局域网设备发现类权限，带 neverForLocation -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission
+        android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
+    <uses-permission
+        android:name="android.permission.NEARBY_WIFI_DEVICES"
+        android:usesPermissionFlags="neverForLocation" />
+
     <application
         android:allowBackup="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
@@ -10,7 +25,10 @@
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
-        android:theme="@style/Theme.MyUPNP">
+        android:theme="@style/Theme.MyUPNP"
+        android:usesCleartextTraffic="true">
+        <!-- usesCleartextTraffic=true：UPnP 设备描述/控制走 http 明文，
+             Android 9+ 默认禁止明文，学习阶段先全局放开 -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
