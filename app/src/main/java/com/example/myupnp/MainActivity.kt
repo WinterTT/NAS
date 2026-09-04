@@ -9,7 +9,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
-import android.widget.ArrayAdapter
+import android.view.ViewGroup
 import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
@@ -25,6 +25,12 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import com.example.myupnp.device.DeviceDescriptionLoader
 import com.example.myupnp.device.ScpdLoader
+import com.example.myupnp.dlna.DlnaPlayer
+import com.example.myupnp.dlna.LastChangeParser
+import com.example.myupnp.gena.EventProperties
+import com.example.myupnp.gena.GenaClient
+import com.example.myupnp.gena.LocalEventServer
+import com.example.myupnp.gena.LocalIp
 import com.example.myupnp.model.UpnpAction
 import com.example.myupnp.model.UpnpDevice
 import com.example.myupnp.model.UpnpService
@@ -87,8 +93,8 @@ class MainActivity : AppCompatActivity() {
     )
 
     private val entries = LinkedHashMap<String, Entry>()
-    private val displayRows = ArrayList<String>()
-    private lateinit var adapter: ArrayAdapter<String>
+    private val deviceItems = ArrayList<DeviceListItem>()
+    private lateinit var adapter: DeviceListAdapter
 
     /** 列表刷新合并：消息风暴时每帧最多真正刷新一次 */
     private var refreshQueued = false
@@ -110,6 +116,34 @@ class MainActivity : AppCompatActivity() {
     private val controlExecutor = Executors.newSingleThreadExecutor { r ->
         Thread(r, "soap-control").apply { isDaemon = true }
     }
+
+    // ------------------------------------------------------------------
+    // 第 3 课：GENA 事件订阅状态
+    // ------------------------------------------------------------------
+
+    /** App 内嵌的回调服务器：收设备 NOTIFY 推送 */
+    private val eventServer = LocalEventServer(object : LocalEventServer.Listener {
+        override fun onEvent(remote: String, sid: String?, nts: String?, body: String) {
+            mainHandler.post { handleIncomingEvent(remote, sid, nts, body) }
+        }
+
+        override fun onInfo(info: String) {
+            mainHandler.post { appendLog("  · $info") }
+        }
+    })
+
+    /** 一次订阅的记录：key = eventSubUrl */
+    private data class Subscription(
+        val eventSubUrl: String,
+        val serviceName: String,
+        var sid: String,
+        var timeoutSec: Int
+    )
+
+    private val subscriptions = HashMap<String, Subscription>()
+
+    /** 续订定时器：到期前自动再 SUBSCRIBE 一次（key = eventSubUrl） */
+    private val renewRunnables = HashMap<String, Runnable>()
 
     // ---- Android 13+ 需要运行时申请 NEARBY_WIFI_DEVICES ----
     private val nearbyPermissionLauncher =
@@ -139,18 +173,20 @@ class MainActivity : AppCompatActivity() {
         btnStart = findViewById(R.id.btnStart)
         btnStop = findViewById(R.id.btnStop)
 
-        adapter = ArrayAdapter(this, android.R.layout.simple_list_item_1, displayRows)
+        adapter = DeviceListAdapter(this, deviceItems)
         listDevices.adapter = adapter
 
-        // ---- 第 2 课：点设备 -> 选择要操作的服务（AVTransport/RenderingControl…） ----
+        // ---- 第 2~4 课：点设备 -> 选择场景（播放器/服务） ----
         listDevices.setOnItemClickListener { _, _, position, _ ->
-            val entry = entries.values.elementAtOrNull(position) ?: return@setOnItemClickListener
+            val item = adapter.getItem(position) as? DeviceListItem.DeviceItem
+                ?: return@setOnItemClickListener // 分组标题不可点
+            val entry = entries[item.entryKey] ?: return@setOnItemClickListener
             val device = entry.device
             if (device == null) {
                 Toast.makeText(this, "设备描述还没加载成功，无法操作", Toast.LENGTH_SHORT).show()
                 return@setOnItemClickListener
             }
-            showServicePicker(entry, device)
+            showDeviceActions(entry, device)
         }
 
         btnStart.setOnClickListener {
@@ -196,6 +232,13 @@ class MainActivity : AppCompatActivity() {
 
         appendLog(">> 开始监听组播组 ${SsdpDiscovery.GROUP_ADDRESS}:${SsdpDiscovery.PORT}")
         discovery.start()
+
+        // 第 3 课：回调服务器要在 SUBSCRIBE 前就位，否则 CALLBACK 地址无效
+        if (eventServer.port == 0) {
+            eventServer.start()
+            appendLog(">> 本机回调地址: ${eventCallbackUrl() ?: "（无法确定 IP）"}")
+        }
+
         btnStart.isEnabled = false
         btnStop.isEnabled = true
         tvStatus.setText(R.string.status_scanning)
@@ -207,6 +250,8 @@ class MainActivity : AppCompatActivity() {
             runCatching { it.release() }
         }
         multicastLock = null
+        unsubscribeAll()       // 第 3 课：退出前先跟设备说再见
+        eventServer.stop()     // 关掉回调服务器
         btnStart.isEnabled = true
         btnStop.isEnabled = false
         tvStatus.setText(R.string.status_idle)
@@ -219,6 +264,8 @@ class MainActivity : AppCompatActivity() {
             runCatching { it.release() }
         }
         multicastLock = null
+        unsubscribeAll()
+        eventServer.stop()
         fetchExecutor.shutdownNow()
         controlExecutor.shutdownNow()
         super.onDestroy()
@@ -322,6 +369,134 @@ class MainActivity : AppCompatActivity() {
     // 第 2 课：SOAP 控制流程（全部在主线程弹 UI，网络请求丢给 controlExecutor）
     // ------------------------------------------------------------------
 
+    /** 0) 点开一台设备：若是播放器给播放器场景，否则直接进服务操作 */
+    private fun showDeviceActions(entry: Entry, device: UpnpDevice) {
+        if (!DlnaPlayer.isRenderer(device)) {
+            showServicePicker(entry, device)
+            return
+        }
+        val renderer = DlnaPlayer.avTransportOf(device)!!
+        val rc = DlnaPlayer.renderingControlOf(device)
+        AlertDialog.Builder(this)
+            .setTitle(device.friendlyName.ifEmpty { "播放器" })
+            .setItems(
+                arrayOf(
+                    "▶ 播放器场景（推送 URL 播放）",
+                    "服务控制 / 订阅（SOAP + GENA）"
+                )
+            ) { _, which ->
+                when (which) {
+                    0 -> showPlayerPanel(renderer, rc)
+                    1 -> showServicePicker(entry, device)
+                }
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    /**
+     * 播放器面板：输入一个媒体 URL，就能让电视/音箱播起来。
+     * 全流程复用前三课：SOAP 控制(SetAVTransportURI/Play/音量) + GENA 订阅(看进度)。
+     */
+    private fun showPlayerPanel(renderer: UpnpService, rc: UpnpService?) {
+        // ---- 构建面板视图（课程演示用，简化为一个输入框 + 按钮行） ----
+        val urlInput = EditText(this).apply {
+            hint = "媒体 URL，如 http://192.168.1.50/video.mp4"
+            textSize = 14f
+        }
+        val btnPlay = Button(this).apply { text = "推送播放" }
+        val btnPause = Button(this).apply { text = "暂停" }
+        val btnStop = Button(this).apply { text = "停止" }
+        val btnVolDown = Button(this).apply { text = "音量−" }
+        val btnVolUp = Button(this).apply { text = "音量＋" }
+        val btnSubscribe = Button(this).apply { text = "订阅状态" }
+
+        // 面板：输入框 + 2 行按钮
+        fun row(vararg views: Button): LinearLayout {
+            val r = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+            for (v in views) {
+                v.layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+                r.addView(v)
+            }
+            return r
+        }
+        val panel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(urlInput)
+            addView(row(btnPlay, btnPause, btnStop))
+            addView(row(btnVolDown, btnVolUp, btnSubscribe))
+        }
+        AlertDialog.Builder(this)
+            .setTitle("DLNA 播放器场景")
+            .setView(panel)
+            .setNegativeButton("关闭", null)
+            .show()
+
+        // ---- 动作绑定：全部丢后台线程，结果打日志 ----
+        btnPlay.setOnClickListener {
+            val url = urlInput.text.toString().trim()
+            if (url.isEmpty()) {
+                Toast.makeText(this, "先填媒体 URL", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+            appendLog("▶ 播放器场景: 推送 $url")
+            controlExecutor.execute {
+                val results = DlnaPlayer.pushAndPlay(renderer, url)
+                for ((name, r) in results) {
+                    mainHandler.post {
+                        appendLog(
+                            if (r.success) "  ✔ $name 成功"
+                            else "  ✘ $name 失败: ${r.summary()}"
+                        )
+                    }
+                }
+                // 推送成功后订阅进度事件，日志里就能看到播放状态变化
+                if (results.lastOrNull()?.second?.success == true) {
+                    mainHandler.post { if (!subscriptions.containsKey(renderer.eventSubUrl)) {
+                        Toast.makeText(this, "已订阅播放状态，看下方日志", Toast.LENGTH_SHORT).show()
+                        subscribeService(renderer)
+                    } }
+                }
+            }
+        }
+        btnPause.setOnClickListener {
+            controlExecutor.execute {
+                val r = DlnaPlayer.transportAction(renderer, "Pause")
+                mainHandler.post { logActionResult("Pause", r) }
+            }
+        }
+        btnStop.setOnClickListener {
+            controlExecutor.execute {
+                val r = DlnaPlayer.transportAction(renderer, "Stop")
+                mainHandler.post { logActionResult("Stop", r) }
+            }
+        }
+        btnVolDown.setOnClickListener { if (rc != null) stepVolume(rc, -10) }
+        btnVolUp.setOnClickListener { if (rc != null) stepVolume(rc, 10) }
+        btnSubscribe.setOnClickListener { subscribeService(renderer) }
+    }
+
+    private fun stepVolume(rc: UpnpService, delta: Int) {
+        appendLog("▶ 音量 ${if (delta > 0) "+" else ""}$delta")
+        controlExecutor.execute {
+            val before = DlnaPlayer.getVolume(rc)
+            val r = DlnaPlayer.stepVolume(rc, delta)
+            val after = if (r.success) DlnaPlayer.getVolume(rc) else -1
+            mainHandler.post {
+                if (r.success) {
+                    appendLog("  音量 $before -> $after")
+                } else {
+                    logActionResult("SetVolume", r)
+                }
+            }
+        }
+    }
+
+    private fun logActionResult(action: String, r: SoapCaller.SoapResult) {
+        if (r.success) appendLog("  ✔ $action 成功")
+        else appendLog("  ✘ $action 失败: ${r.summary()}")
+    }
+
     /** 1) 选择设备里的一个服务 */
     private fun showServicePicker(entry: Entry, device: UpnpDevice) {
         if (device.services.isEmpty()) {
@@ -332,7 +507,32 @@ class MainActivity : AppCompatActivity() {
         AlertDialog.Builder(this)
             .setTitle("${device.friendlyName} — 选择服务")
             .setItems(names.toTypedArray()) { _, which ->
-                showActionPicker(entry, device.services[which])
+                val service = device.services[which]
+                showServiceMenu(entry, service)
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    /** 1.5) 对一个服务：控制(SOAP) / 订阅事件(GENA) / 退订 */
+    private fun showServiceMenu(entry: Entry, service: UpnpService) {
+        val subscribed = subscriptions.containsKey(service.eventSubUrl)
+        val menu = mutableListOf("① 动作控制 (SOAP)")
+        if (!subscribed) {
+            menu += "② 订阅事件推送 (GENA)"
+        } else {
+            menu += "② 续订事件 (已订阅)"
+            menu += "③ 退订事件"
+        }
+        AlertDialog.Builder(this)
+            .setTitle(shortServiceName(service))
+            .setItems(menu.toTypedArray()) { _, which ->
+                when (menu[which]) {
+                    "① 动作控制 (SOAP)" -> showActionPicker(entry, service)
+                    "② 订阅事件推送 (GENA)" -> subscribeService(service)
+                    "② 续订事件 (已订阅)" -> renewSubscription(service.eventSubUrl)
+                    "③ 退订事件" -> unsubscribeService(service)
+                }
             }
             .setNegativeButton("取消", null)
             .show()
@@ -453,29 +653,210 @@ class MainActivity : AppCompatActivity() {
     }
 
     // ------------------------------------------------------------------
-    // UI 刷新
+    // 第 3 课：GENA 事件订阅
     // ------------------------------------------------------------------
-    private fun refreshDeviceList() {
-        displayRows.clear()
-        for (entry in entries.values) {
-            val device = entry.device
-            if (device != null) {
-                displayRows +=
-                    "${device.friendlyName.ifEmpty { "（未命名）" }}\n" +
-                        "  型号: ${device.modelName.ifEmpty { "?" }} | " +
-                        "制造商: ${device.manufacturer.ifEmpty { "?" }}\n" +
-                        "  UDN: ${device.udn}\n" +
-                        "  服务(${device.services.size}): " +
-                        device.services.joinToString(", ") { it.serviceType.substringAfterLast(':') } +
-                        "\n  @ ${entry.location}"
-            } else {
-                displayRows +=
-                    "（等待描述…）\n  USN: ${entry.usn ?: "?"}\n  @ ${entry.location}" +
-                    if (entry.failed) "\n  描述获取失败" else ""
+
+    /** 订阅一个服务的事件推送 */
+    private fun subscribeService(service: UpnpService) {
+        val eventUrl = service.eventSubUrl
+        if (eventUrl.isBlank()) {
+            Toast.makeText(this, "该服务没有 eventSubURL", Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (subscriptions.containsKey(eventUrl)) {
+            Toast.makeText(this, "已在订阅中，正在续订", Toast.LENGTH_SHORT).show()
+            renewSubscription(eventUrl)
+            return
+        }
+        val callbackUrl = eventCallbackUrl()
+        if (callbackUrl == null) {
+            Toast.makeText(this, "无法确定本机 IP，订阅失败", Toast.LENGTH_LONG).show()
+            return
+        }
+        appendLog(
+            ">> SUBSCRIBE ${shortServiceName(service)} @ $eventUrl\n" +
+                "   回调地址 CALLBACK: $callbackUrl（设备将往这里推事件）"
+        )
+        controlExecutor.execute {
+            val result = GenaClient.subscribe(eventUrl, callbackUrl)
+            mainHandler.post {
+                if (result.ok) {
+                    val sub = Subscription(
+                        eventSubUrl = eventUrl,
+                        serviceName = shortServiceName(service),
+                        sid = result.sid,
+                        timeoutSec = result.timeoutSec.let { if (it <= 0) 1800 else it }
+                    )
+                    subscriptions[eventUrl] = sub
+                    appendLog("<< 订阅成功 SID=${result.sid} TIMEOUT=${sub.timeoutSec}s，已安排自动续订")
+                    scheduleRenewal(eventUrl)
+                } else {
+                    appendLog("!! 订阅失败: ${result.message}")
+                    Toast.makeText(this, "订阅失败: ${result.message}", Toast.LENGTH_LONG).show()
+                }
             }
         }
+    }
+
+    /** 到期前自动续订（手动或定时触发） */
+    private fun renewSubscription(eventUrl: String) {
+        val sub = subscriptions[eventUrl] ?: return
+        appendLog(">> RENEW ${sub.serviceName} SID=${sub.sid}")
+        controlExecutor.execute {
+            val result = GenaClient.renew(eventUrl, sub.sid, 1800)
+            mainHandler.post {
+                if (result.ok) {
+                    sub.sid = result.sid.ifEmpty { sub.sid }
+                    sub.timeoutSec = result.timeoutSec.let { if (it <= 0) 1800 else it }
+                    appendLog("<< 续订成功，新 TIMEOUT=${sub.timeoutSec}s")
+                    scheduleRenewal(eventUrl)
+                } else {
+                    appendLog("!! 续订失败: ${result.message}（订阅可能已失效）")
+                    subscriptions.remove(eventUrl)
+                    renewRunnables.remove(eventUrl)?.let { mainHandler.removeCallbacks(it) }
+                }
+            }
+        }
+    }
+
+    /** 退订：停止接收该服务的事件 */
+    private fun unsubscribeService(service: UpnpService) {
+        val eventUrl = service.eventSubUrl
+        val sub = subscriptions[eventUrl]
+        if (sub == null) {
+            Toast.makeText(this, "该服务尚未订阅", Toast.LENGTH_SHORT).show()
+            return
+        }
+        appendLog(">> UNSUBSCRIBE ${sub.serviceName} SID=${sub.sid}")
+        controlExecutor.execute {
+            val result = GenaClient.unsubscribe(eventUrl, sub.sid)
+            mainHandler.post {
+                if (result.ok) {
+                    appendLog("<< 退订成功")
+                } else {
+                    appendLog("!! 退订失败: ${result.message}")
+                }
+                subscriptions.remove(eventUrl)
+                renewRunnables.remove(eventUrl)?.let { mainHandler.removeCallbacks(it) }
+            }
+        }
+    }
+
+    /** 按设备退出时的清理：退掉所有订阅 */
+    private fun unsubscribeAll() {
+        val snapshot = subscriptions.values.toList()
+        for (sub in snapshot) {
+            appendLog(">> 清理: UNSUBSCRIBE ${sub.serviceName}")
+            controlExecutor.execute {
+                GenaClient.unsubscribe(sub.eventSubUrl, sub.sid)
+            }
+        }
+        subscriptions.clear()
+        renewRunnables.values.forEach { mainHandler.removeCallbacks(it) }
+        renewRunnables.clear()
+    }
+
+    /** 在 timeout 的一半时间点自动续订一次 */
+    private fun scheduleRenewal(eventUrl: String) {
+        val sub = subscriptions[eventUrl] ?: return
+        renewRunnables.remove(eventUrl)?.let { mainHandler.removeCallbacks(it) }
+        val runnable = Runnable { renewSubscription(eventUrl) }
+        renewRunnables[eventUrl] = runnable
+        val delayMs = (sub.timeoutSec * 1_000L / 2).coerceAtLeast(5_000L)
+        mainHandler.postDelayed(runnable, delayMs)
+    }
+
+    /** 构造本机回调地址 http://<本机IP>:<端口>/upnp/event/cb；服务器没起来返回 null */
+    private fun eventCallbackUrl(): String? {
+        val ip = LocalIp.ipv4() ?: return null
+        if (eventServer.port == 0) return null
+        return "http://$ip:${eventServer.port}/upnp/event/cb"
+    }
+
+    /** 收到设备推送（LocalEventServer 回调，已在主线程） */
+    private fun handleIncomingEvent(remote: String, sid: String?, nts: String?, body: String) {
+        appendLog("◀ 事件推送 from $remote NTS=${nts ?: "?"} SID=${sid ?: "?"}")
+        val props = EventProperties.parse(body)
+        if (props.isEmpty()) {
+            appendLog("   (空属性)")
+        }
+        for ((name, value) in props) {
+            // 第 4 课：LastChange 是转义嵌套 XML，展开成可读状态（TransportState 等）
+            if (name == "LastChange") {
+                appendLog("   LastChange 展开:")
+                val lc = LastChangeParser.parse(value)
+                if (lc.transportState != null) appendLog("     播放状态 TransportState = ${lc.transportState}")
+                if (lc.currentTrackDuration != null) appendLog("     总时长 = ${lc.currentTrackDuration}")
+                if (lc.relativeTimePosition != null) appendLog("     已播位置 = ${lc.relativeTimePosition}")
+                if (lc.volume != null) appendLog("     音量 = ${lc.volume}")
+                if (lc.mute != null) appendLog("     静音 = ${lc.mute}")
+                if (lc.values.isNotEmpty()) {
+                    val extra = lc.values.entries
+                        .filter { it.key !in listOf("TransportState", "CurrentTrackDuration", "RelativeTimePosition", "Volume", "Mute") }
+                        .joinToString(", ") { "${it.key}=${it.value}" }
+                    if (extra.isNotBlank()) appendLog("     其他: $extra")
+                }
+            } else {
+                appendLog("   $name = $value")
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // UI 刷新
+    // ------------------------------------------------------------------
+
+    /** 判断设备类型：MediaServer（媒体服务器）或其它 */
+    private fun isMediaServer(device: UpnpDevice): Boolean {
+        // 设备类型 URN 通常形如 urn:schemas-upnp-org:device:MediaServer:1；
+        // 有些设备类型写得不标准，就用特征服务 ContentDirectory 兜底判断
+        return device.deviceType.contains("MediaServer", ignoreCase = true) ||
+            device.services.any { it.serviceType.contains("ContentDirectory", ignoreCase = true) }
+    }
+
+    /** 重新生成分组列表：MediaServer 一组，其它一组 */
+    private fun refreshDeviceList() {
+        deviceItems.clear()
+
+        // 先按类型分桶，保持每桶内按发现顺序
+        val mediaServer = ArrayList<Entry>()
+        val others = ArrayList<Entry>()
+        for (entry in entries.values) {
+            val device = entry.device
+            if (device != null && isMediaServer(device)) mediaServer.add(entry)
+            else others.add(entry)
+        }
+
+        fun appendGroup(title: String, group: List<Entry>) {
+            if (group.isEmpty()) return
+            deviceItems += DeviceListItem.Header(title)
+            for (entry in group) {
+                deviceItems += DeviceListItem.DeviceItem(entry.location, formatDeviceText(entry))
+            }
+        }
+
+        appendGroup("📦 MediaServer（${mediaServer.size}）", mediaServer)
+        appendGroup("其他设备（${others.size}）", others)
+
         adapter.notifyDataSetChanged()
         tvDeviceTitle.text = getString(R.string.device_title) + "  (${entries.size})"
+    }
+
+    /** 一台设备的多行展示文本 */
+    private fun formatDeviceText(entry: Entry): String {
+        val device = entry.device
+        return if (device != null) {
+            "${device.friendlyName.ifEmpty { "（未命名）" }}\n" +
+                "  型号: ${device.modelName.ifEmpty { "?" }} | " +
+                "制造商: ${device.manufacturer.ifEmpty { "?" }}\n" +
+                "  类型: ${device.deviceType.substringAfterLast(':').ifEmpty { device.deviceType }}\n" +
+                "  服务(${device.services.size}): " +
+                device.services.joinToString(", ") { it.serviceType.substringAfterLast(':') } +
+                "\n  @ ${entry.location}"
+        } else {
+            "（等待描述…）\n  USN: ${entry.usn ?: "?"}\n  @ ${entry.location}" +
+                if (entry.failed) "\n  描述获取失败" else ""
+        }
     }
 
     // ------------------------------------------------------------------
