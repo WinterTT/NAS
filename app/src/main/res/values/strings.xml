@@ -2,10 +2,9 @@
     <string name="app_name">My UPNP</string>
     <string name="btn_start">开始扫描</string>
     <string name="btn_stop">停止</string>
-    <string name="btn_clear">清空日志</string>
+    <string name="btn_clear">清空设备</string>
     <string name="status_idle">空闲：请连接 Wi-Fi 后点击「开始扫描」</string>
     <string name="status_scanning">正在扫描 SSDP 组播组 239.255.255.250:1900 …</string>
     <string name="device_title">发现的设备</string>
-    <string name="log_title">SSDP 协议日志</string>
     <string name="nearby_wifi_rationale">需要「附近的设备」权限以在局域网中发现 UPnP 设备</string>
 </resources>

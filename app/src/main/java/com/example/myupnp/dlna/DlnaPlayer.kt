@@ -133,18 +133,45 @@ object DlnaPlayer {
     /**
      * 构造 DLNA 的 DIDL-Lite 描述。SetAVTransportURI 的 CurrentURIMetaData
      * 期望一个 DIDL 文档，声明资源的类型/标题，很多 DLNA 设备缺它就直接 701/712。
-     * 这里给最小可用实现：一段视频 item。
+     * 会根据 URL 扩展名推断音/视频，默认按音频处理（音箱场景）。
      */
-    fun didlMetadata(url: String, title: String): String =
-        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>" +
+    fun didlMetadata(url: String, title: String): String {
+        val kind = guessMediaKind(url)
+        return "<?xml version=\"1.0\" encoding=\"UTF-8\"?>" +
             "<DIDL-Lite xmlns=\"urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/\" " +
             "xmlns:dc=\"http://purl.org/dc/elements/1.1/\" " +
             "xmlns:upnp=\"urn:schemas-upnp-org:metadata-1-0/upnp/\">" +
             "<item id=\"0\" parentID=\"-1\" restricted=\"1\">" +
             "<dc:title>${xmlEscape(title)}</dc:title>" +
-            "<upnp:class>object.item.videoItem</upnp:class>" +
-            "<res protocolInfo=\"http-get:*:video/mp4:*\">${xmlEscape(url)}</res>" +
+            "<upnp:class>${kind.upnpClass}</upnp:class>" +
+            "<res protocolInfo=\"http-get:*:${kind.mime}:*\">${xmlEscape(url)}</res>" +
             "</item></DIDL-Lite>"
+    }
+
+    /** URL 扩展名 → (MIME, UPnP class) */
+    private data class MediaKind(val mime: String, val upnpClass: String)
+
+    private fun guessMediaKind(url: String): MediaKind {
+        val clean = url.substringBefore('?') // 去掉查询参数
+        val ext = clean.substringAfterLast('.', "").lowercase()
+        return when (ext) {
+            // 音频：DLNA 音箱主要吃 mp3；wav/flac/m4a 很多也支持
+            "mp3" -> MediaKind("audio/mpeg", "object.item.audioItem")
+            "wav" -> MediaKind("audio/wav", "object.item.audioItem")
+            "flac" -> MediaKind("audio/flac", "object.item.audioItem")
+            "m4a", "aac" -> MediaKind("audio/mp4", "object.item.audioItem")
+            "ogg", "oga" -> MediaKind("audio/ogg", "object.item.audioItem")
+            // 视频
+            "mp4", "m4v", "mov" -> MediaKind("video/mp4", "object.item.videoItem")
+            "mkv" -> MediaKind("video/x-matroska", "object.item.videoItem")
+            "avi" -> MediaKind("video/x-msvideo", "object.item.videoItem")
+            "ts", "m2ts" -> MediaKind("video/mpeg", "object.item.videoItem")
+            // 图片
+            "jpg", "jpeg", "png" -> MediaKind("image/jpeg", "object.item.imageItem")
+            // 未知一律按音频处理（本场景以音箱为主）
+            else -> MediaKind("audio/mpeg", "object.item.audioItem")
+        }
+    }
 
     private fun xmlEscape(s: String): String = s
         .replace("&", "&amp;")

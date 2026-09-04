@@ -63,28 +63,4 @@
         android:divider="?android:attr/listDivider"
         android:choiceMode="none" />
 
-    <TextView
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="10dp"
-        android:text="@string/log_title"
-        android:textColor="?android:attr/textColorSecondary"
-        android:textSize="13sp" />
-
-    <ScrollView
-        android:id="@+id/scrollLog"
-        android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1"
-        android:layout_marginTop="2dp"
-        android:background="#F2F2F2">
-
-        <TextView
-            android:id="@+id/tvLog"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:fontFamily="monospace"
-            android:textIsSelectable="true"
-            android:textSize="11sp" />
-    </ScrollView>
 </LinearLayout>

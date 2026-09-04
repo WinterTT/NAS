@@ -9,12 +9,12 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.util.Log
 import android.view.ViewGroup
 import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ListView
-import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.enableEdgeToEdge
@@ -25,12 +25,15 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import com.example.myupnp.device.DeviceDescriptionLoader
 import com.example.myupnp.device.ScpdLoader
+import com.example.myupnp.dlna.ContentDirectoryClient
 import com.example.myupnp.dlna.DlnaPlayer
 import com.example.myupnp.dlna.LastChangeParser
 import com.example.myupnp.gena.EventProperties
 import com.example.myupnp.gena.GenaClient
 import com.example.myupnp.gena.LocalEventServer
 import com.example.myupnp.gena.LocalIp
+import com.example.myupnp.model.MediaContainer
+import com.example.myupnp.model.MediaItem
 import com.example.myupnp.model.UpnpAction
 import com.example.myupnp.model.UpnpDevice
 import com.example.myupnp.model.UpnpService
@@ -57,8 +60,6 @@ class MainActivity : AppCompatActivity() {
     private lateinit var tvStatus: TextView
     private lateinit var tvDeviceTitle: TextView
     private lateinit var listDevices: ListView
-    private lateinit var tvLog: TextView
-    private lateinit var scrollLog: ScrollView
     private lateinit var btnStart: Button
     private lateinit var btnStop: Button
 
@@ -69,10 +70,12 @@ class MainActivity : AppCompatActivity() {
         }
 
         override fun onEngineError(error: Throwable) {
+            Log.w(TAG, "[SSDP!] 引擎错误: ${error.message}")
             mainHandler.post { appendLog("!! 引擎错误: ${error.message}") }
         }
 
         override fun onSsdpInfo(info: String) {
+            Log.d(TAG, "[SSDP] $info")
             mainHandler.post { appendLog("  · $info") }
         }
     })
@@ -98,15 +101,6 @@ class MainActivity : AppCompatActivity() {
 
     /** 列表刷新合并：消息风暴时每帧最多真正刷新一次 */
     private var refreshQueued = false
-
-    /** 日志节流：同一类报文(类型+USN)在 LOG_COOLDOWN_MS 内只打印一次，防止刷屏 */
-    private val logCooldown = HashMap<String, Long>()
-
-    /** 日志缓冲：先攒在内存里，定时批量刷一次 TextView，避免每条都触发整段文本重排（会卡死主线程） */
-    private val logBuffer = StringBuilder()
-
-    /** 是否已排队一次日志 flush */
-    private var logFlushPending = false
 
     private val fetchExecutor = Executors.newSingleThreadExecutor { r ->
         Thread(r, "description-fetch").apply { isDaemon = true }
@@ -168,8 +162,6 @@ class MainActivity : AppCompatActivity() {
         tvStatus = findViewById(R.id.tvStatus)
         tvDeviceTitle = findViewById(R.id.tvDeviceTitle)
         listDevices = findViewById(R.id.listDevices)
-        tvLog = findViewById(R.id.tvLog)
-        scrollLog = findViewById(R.id.scrollLog)
         btnStart = findViewById(R.id.btnStart)
         btnStop = findViewById(R.id.btnStop)
 
@@ -203,21 +195,18 @@ class MainActivity : AppCompatActivity() {
         }
         btnStop.setOnClickListener { stopScanning() }
         findViewById<Button>(R.id.btnClear).setOnClickListener {
-            logBuffer.setLength(0)
-            logFlushPending = false
-            tvLog.text = ""
             entries.clear()
             requestRefresh()
         }
 
-        appendLog("=== MyUPNP 控制点启动 ===")
-        appendLog("提示：确保手机和被测设备在同一 Wi-Fi 网段")
+        Log.i(TAG, "[UI] MyUPNP 启动完成，等待用户操作")
     }
 
     // ------------------------------------------------------------------
     // 扫描控制
     // ------------------------------------------------------------------
     private fun startScanningInternal() {
+        Log.i(TAG, "[SCAN] 开始扫描，请求 MulticastLock")
         appendLog(">> 请求 MulticastLock（否则收不到组播帧）")
         multicastLock = try {
             val wifi = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
@@ -226,6 +215,7 @@ class MainActivity : AppCompatActivity() {
                 acquire()
             }
         } catch (e: Exception) {
+            Log.w(TAG, "[SCAN] MulticastLock 获取失败: ${e.message}")
             appendLog("!! 获取 MulticastLock 失败: ${e.message}")
             null
         }
@@ -236,7 +226,9 @@ class MainActivity : AppCompatActivity() {
         // 第 3 课：回调服务器要在 SUBSCRIBE 前就位，否则 CALLBACK 地址无效
         if (eventServer.port == 0) {
             eventServer.start()
-            appendLog(">> 本机回调地址: ${eventCallbackUrl() ?: "（无法确定 IP）"}")
+            val cb = eventCallbackUrl()
+            Log.i(TAG, "[SCAN] 事件回调服务器端口=${eventServer.port} 本机回调=$cb")
+            appendLog(">> 本机回调地址: ${cb ?: "（无法确定 IP）"}")
         }
 
         btnStart.isEnabled = false
@@ -245,6 +237,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun stopScanning() {
+        Log.i(TAG, "[SCAN] 停止扫描")
         discovery.stop()
         multicastLock?.let {
             runCatching { it.release() }
@@ -275,21 +268,14 @@ class MainActivity : AppCompatActivity() {
     // 处理收到的 SSDP 消息（主线程）
     // ------------------------------------------------------------------
     private fun handleSsdpMessage(message: com.example.myupnp.ssdp.SsdpMessage) {
-        // 日志节流：同样的(类型+USN)消息 10 秒内只打印一次
-        val logKey = "${message.type}|${message.usn ?: message.location ?: message.sourceHost}"
-        val nowMs = System.currentTimeMillis()
-        val lastShown = logCooldown[logKey] ?: 0L
-        if (nowMs - lastShown >= LOG_COOLDOWN_MS) {
-            logCooldown[logKey] = nowMs
-            if (logCooldown.size > 512) {
-                val it = logCooldown.entries.iterator()
-                while (logCooldown.size > 256 && it.hasNext()) {
-                    it.next()
-                    it.remove()
-                }
-            }
-            appendLog(formatSsdpMessage(message))
-        }
+        // logcat：不经 UI 节流，设备多时也逐条留痕，方便 adb logcat -s MyUPNP 排查
+        Log.d(
+            TAG,
+            "[SSDP:${message.type}] from=${message.sourceHost} " +
+                "usn=${message.usn ?: "-"} loc=${message.location ?: "-"} " +
+                "nt=${message.nt ?: "-"}"
+        )
+        // UI 日志区已移除：报文细节全部走 logcat（见上方 Log.d），这里只管业务处理
 
         when (message.type) {
             SsdpMessageType.SEARCH_RESPONSE,
@@ -305,12 +291,15 @@ class MainActivity : AppCompatActivity() {
         val location = message.location ?: return
         val ip = runCatching { URL(location).host }.getOrDefault("")
 
+        val isNew = !entries.containsKey(location)
         val entry = entries[location] ?: Entry(location, ip = ip).also {
             entries[location] = it
             // 首次见到才拉描述；后续同 LOCATION 的消息只刷新在线状态
             fetchDescription(it)
         }
         if (entry.usn == null) entry.usn = message.usn
+        if (isNew) Log.i(TAG, "[DEVICE+] $ip  location=$location")
+        else Log.v(TAG, "[DEVICE~] 已见过的设备刷新生效: $location")
         requestRefresh()
     }
 
@@ -326,6 +315,7 @@ class MainActivity : AppCompatActivity() {
             if (entryUuid == goneUuid) {
                 it.remove()
                 removed = true
+                Log.i(TAG, "[DEVICE-] 下线移除: $location (usn=$usn)")
                 appendLog("-- 设备下线，移除: ${location}")
             }
         }
@@ -335,6 +325,7 @@ class MainActivity : AppCompatActivity() {
     /** 后台线程拉取 description.xml，成功后回主线程更新 */
     private fun fetchDescription(entry: Entry) {
         val location = entry.location
+        Log.d(TAG, "[DESC>] 开始拉取描述: $location")
         fetchExecutor.execute {
             val device = DeviceDescriptionLoader.load(location)
             mainHandler.post {
@@ -342,12 +333,18 @@ class MainActivity : AppCompatActivity() {
                 if (live == null) return@post // 拉取期间设备已下线
                 if (device != null) {
                     live.device = device
+                    Log.i(
+                        TAG,
+                        "[DESC<] 成功: ${device.friendlyName} | type=${device.deviceType} | " +
+                            "${device.services.size} 个服务 | $location"
+                    )
                     appendLog(
                         "  描述解析成功: ${device.friendlyName} | ${device.modelName} | " +
                             "${device.services.size} 个服务"
                     )
                 } else {
                     live.failed = true
+                    Log.w(TAG, "[DESC!] 拉取失败: $location")
                     appendLog("!! 描述拉取失败: $location")
                 }
                 requestRefresh()
@@ -369,29 +366,189 @@ class MainActivity : AppCompatActivity() {
     // 第 2 课：SOAP 控制流程（全部在主线程弹 UI，网络请求丢给 controlExecutor）
     // ------------------------------------------------------------------
 
-    /** 0) 点开一台设备：若是播放器给播放器场景，否则直接进服务操作 */
+    /** 0) 点开一台设备：播放器给播放场景；MediaServer 给曲库浏览；其它进服务操作 */
     private fun showDeviceActions(entry: Entry, device: UpnpDevice) {
-        if (!DlnaPlayer.isRenderer(device)) {
-            showServicePicker(entry, device)
+        if (DlnaPlayer.isRenderer(device)) {
+            val renderer = DlnaPlayer.avTransportOf(device)!!
+            val rc = DlnaPlayer.renderingControlOf(device)
+            AlertDialog.Builder(this)
+                .setTitle(device.friendlyName.ifEmpty { "播放器" })
+                .setItems(
+                    arrayOf(
+                        "▶ 播放器场景（推送 URL 播放）",
+                        "服务控制 / 订阅（SOAP + GENA）"
+                    )
+                ) { _, which ->
+                    when (which) {
+                        0 -> showPlayerPanel(renderer, rc)
+                        1 -> showServicePicker(entry, device)
+                    }
+                }
+                .setNegativeButton("取消", null)
+                .show()
             return
         }
-        val renderer = DlnaPlayer.avTransportOf(device)!!
-        val rc = DlnaPlayer.renderingControlOf(device)
-        AlertDialog.Builder(this)
-            .setTitle(device.friendlyName.ifEmpty { "播放器" })
-            .setItems(
-                arrayOf(
-                    "▶ 播放器场景（推送 URL 播放）",
-                    "服务控制 / 订阅（SOAP + GENA）"
-                )
-            ) { _, which ->
-                when (which) {
-                    0 -> showPlayerPanel(renderer, rc)
-                    1 -> showServicePicker(entry, device)
+        if (isMediaServer(device)) {
+            val cds = device.services.firstOrNull { it.serviceType.contains("ContentDirectory") }
+            if (cds != null) {
+                val menus = mutableListOf("📁 浏览媒体库（ContentDirectory）")
+                val actions = mutableListOf<() -> Unit>()
+                actions += { showMediaBrowser(cds) }
+                // 如果同一台还挂别的服务，也给出口
+                if (device.services.any { it.serviceType.contains("ContentDirectory").not() }) {
+                    menus += "服务控制 / 订阅（SOAP + GENA）"
+                    actions += { showServicePicker(entry, device) }
                 }
+                AlertDialog.Builder(this)
+                    .setTitle(device.friendlyName.ifEmpty { "MediaServer" })
+                    .setItems(menus.toTypedArray()) { _, which ->
+                        actions[which]()
+                    }
+                    .setNegativeButton("取消", null)
+                    .show()
+                return
+            }
+        }
+        showServicePicker(entry, device)
+    }
+
+    /**
+     * 曲库浏览器：从根开始逐层 Browse，点歌曲推给播放器。
+     * 用简单对话框做导航，breadcrumb 保留当前路径用于"返回上级"。
+     */
+    private fun showMediaBrowser(cds: UpnpService) {
+        showMediaLevel(cds, ContentDirectoryClient.ROOT_OBJECT_ID, emptyList())
+    }
+
+    private fun showMediaLevel(
+        cds: UpnpService,
+        objectId: String,
+        crumb: List<Pair<String, String>> // (id, 标题) 栈，最右为当前层
+    ) {
+        appendLog(">> Browse ${crumb.lastOrNull()?.second ?: "根目录"} ($objectId) @ ${cds.controlUrl}")
+        Log.d(
+            TAG,
+            "[CDS>] Browse objectId=$objectId ctrl=${cds.controlUrl} serviceType=${cds.serviceType}"
+        )
+        val dialog = AlertDialog.Builder(this)
+            .setTitle(crumb.lastOrNull()?.second ?: "媒体库")
+            .setMessage("正在加载…")
+            .setNegativeButton("关闭", null)
+            .show()
+
+        controlExecutor.execute {
+            val out = ContentDirectoryClient.browse(cds, objectId)
+            mainHandler.post {
+                if (dialog.isShowing) dialog.dismiss()
+                if (!out.ok) {
+                    Log.e(TAG, "[CDS!] Browse 失败 objectId=$objectId: ${out.error}")
+                    if (out.rawSnippet.isNotBlank()) Log.e(TAG, "[CDS!] 响应片段: ${out.rawSnippet}")
+                    appendLog("!! Browse 失败: ${out.error}")
+                    if (out.rawSnippet.isNotBlank()) appendLog("   响应片段: ${out.rawSnippet}")
+                    Toast.makeText(this, "Browse 失败: ${out.error}", Toast.LENGTH_LONG).show()
+                    return@post
+                }
+                if (out.objects.isEmpty()) {
+                    Log.w(TAG, "[CDS] Browse 成功但目录为空 objectId=$objectId")
+                    appendLog("  该目录为空（没有子项）")
+                    Toast.makeText(this, "目录是空的", Toast.LENGTH_SHORT).show()
+                    return@post
+                }
+                Log.i(
+                    TAG,
+                    "[CDS<] Browse 返回 ${out.objects.size} 项: " +
+                        out.objects.joinToString(", ") { "${it.title}[${if (it.isContainer) "dir" else "file"}]" }
+                )
+
+                // 组装菜单：前面加"返回上级"
+                val labels = ArrayList<String>()
+                val itemActions = ArrayList<() -> Unit>()
+                if (crumb.isNotEmpty()) {
+                    labels += "⬅ 返回上级"
+                    itemActions += {
+                        val parent = crumb.last()
+                        showMediaLevel(cds, parent.first, crumb.dropLast(1))
+                    }
+                }
+                for (obj in out.objects) {
+                    labels += obj.displayText()
+                    if (obj is MediaContainer) {
+                        itemActions += { showMediaLevel(cds, obj.id, crumb + (obj.id to obj.title)) }
+                    } else if (obj is MediaItem) {
+                        itemActions += { playMediaItemFromServer(obj) }
+                    }
+                }
+
+                AlertDialog.Builder(this)
+                    .setTitle(crumb.lastOrNull()?.second ?: "媒体库")
+                    .setItems(labels.toTypedArray()) { _, which ->
+                        itemActions[which]()
+                    }
+                    .setNegativeButton("关闭", null)
+                    .show()
+            }
+        }
+    }
+
+    /** 曲库里点歌：先列出所有可播放设备让用户选（只有一台才直接播） */
+    private fun playMediaItemFromServer(item: MediaItem) {
+        if (item.resUrl.isBlank()) {
+            Toast.makeText(this, "该条目没有可播放地址(res)", Toast.LENGTH_SHORT).show()
+            return
+        }
+        // 收集所有 MediaRenderer（有 AVTransport 服务），按发现顺序
+        val renderers = entries.values
+            .mapNotNull { e -> e.device?.let { d -> (DlnaPlayer.avTransportOf(d))?.let { avt -> e to avt } } }
+            .filter { it.first.device != null }
+
+        if (renderers.isEmpty()) {
+            Toast.makeText(this, "没发现可播放的 MediaRenderer（音响/电视）", Toast.LENGTH_LONG).show()
+            return
+        }
+        if (renderers.size == 1) {
+            pushToRenderer(renderers[0].second, renderers[0].first.device!!.friendlyName, item)
+            return
+        }
+        // 多台播放设备 -> 弹框让用户选推给谁
+        val names = renderers.map { (e, _) ->
+            val d = e.device!!
+            "📺 ${d.friendlyName.ifEmpty { "未命名" }}  ${d.modelName}"
+        }
+        AlertDialog.Builder(this)
+            .setTitle("推送给哪台设备播放？")
+            .setItems(names.toTypedArray()) { _, which ->
+                val (e, avt) = renderers[which]
+                pushToRenderer(avt, e.device!!.friendlyName, item)
             }
             .setNegativeButton("取消", null)
             .show()
+    }
+
+    /** 真正推送一首歌到指定播放器（含日志、结果、自动订阅状态） */
+    private fun pushToRenderer(
+        renderer: UpnpService,
+        deviceName: String,
+        item: MediaItem
+    ) {
+        val targetName = deviceName.ifEmpty { "播放器" }
+        appendLog("▶ 从曲库推送 ${item.title} → $targetName\n   地址: ${item.resUrl}")
+        controlExecutor.execute {
+            val results = DlnaPlayer.pushAndPlay(renderer, item.resUrl, item.title)
+            for ((name, r) in results) {
+                mainHandler.post {
+                    appendLog(
+                        if (r.success) "  ✔ $name 成功"
+                        else "  ✘ $name 失败: ${r.summary()}"
+                    )
+                }
+            }
+            if (results.lastOrNull()?.second?.success == true) {
+                mainHandler.post {
+                    Toast.makeText(this, "已推送给 $targetName 播放", Toast.LENGTH_SHORT).show()
+                    if (!subscriptions.containsKey(renderer.eventSubUrl)) subscribeService(renderer)
+                }
+            }
+        }
     }
 
     /**
@@ -620,9 +777,25 @@ class MainActivity : AppCompatActivity() {
             ">> SOAP 调用 ${action.name} @ ${service.controlUrl}  参数=$args " +
                 "SOAPACTION=\"${service.serviceType}#${action.name}\""
         )
+        Log.d(
+            TAG,
+            "[SOAP>] ${service.serviceType}#${action.name} @ ${service.controlUrl} args=$args"
+        )
         controlExecutor.execute {
             val result = SoapCaller.call(service.controlUrl, service.serviceType, action.name, args)
             mainHandler.post {
+                if (result.success) {
+                    Log.i(
+                        TAG,
+                        "[SOAP<] ${action.name} OK http=${result.httpCode} @ ${service.controlUrl}"
+                    )
+                } else {
+                    Log.e(
+                        TAG,
+                        "[SOAP!] ${action.name} 失败 ${result.summary()} @ ${service.controlUrl} " +
+                            "body=${result.body.take(300)}"
+                    )
+                }
                 appendLog("<< 响应 http=${result.httpCode} success=${result.success}")
                 if (result.success) {
                     appendLog("   响应体: ${result.body.take(600)}")
@@ -677,6 +850,7 @@ class MainActivity : AppCompatActivity() {
             ">> SUBSCRIBE ${shortServiceName(service)} @ $eventUrl\n" +
                 "   回调地址 CALLBACK: $callbackUrl（设备将往这里推事件）"
         )
+        Log.d(TAG, "[GENA>] SUBSCRIBE $eventUrl CALLBACK=$callbackUrl")
         controlExecutor.execute {
             val result = GenaClient.subscribe(eventUrl, callbackUrl)
             mainHandler.post {
@@ -688,9 +862,11 @@ class MainActivity : AppCompatActivity() {
                         timeoutSec = result.timeoutSec.let { if (it <= 0) 1800 else it }
                     )
                     subscriptions[eventUrl] = sub
+                    Log.i(TAG, "[GENA<] 订阅成功 ${sub.serviceName} SID=${result.sid}")
                     appendLog("<< 订阅成功 SID=${result.sid} TIMEOUT=${sub.timeoutSec}s，已安排自动续订")
                     scheduleRenewal(eventUrl)
                 } else {
+                    Log.w(TAG, "[GENA!] 订阅失败 $eventUrl: ${result.message}")
                     appendLog("!! 订阅失败: ${result.message}")
                     Toast.makeText(this, "订阅失败: ${result.message}", Toast.LENGTH_LONG).show()
                 }
@@ -702,6 +878,7 @@ class MainActivity : AppCompatActivity() {
     private fun renewSubscription(eventUrl: String) {
         val sub = subscriptions[eventUrl] ?: return
         appendLog(">> RENEW ${sub.serviceName} SID=${sub.sid}")
+        Log.d(TAG, "[GENA] RENEW ${sub.serviceName} $eventUrl SID=${sub.sid}")
         controlExecutor.execute {
             val result = GenaClient.renew(eventUrl, sub.sid, 1800)
             mainHandler.post {
@@ -728,6 +905,7 @@ class MainActivity : AppCompatActivity() {
             return
         }
         appendLog(">> UNSUBSCRIBE ${sub.serviceName} SID=${sub.sid}")
+        Log.d(TAG, "[GENA] UNSUBSCRIBE ${sub.serviceName} SID=${sub.sid}")
         controlExecutor.execute {
             val result = GenaClient.unsubscribe(eventUrl, sub.sid)
             mainHandler.post {
@@ -775,6 +953,7 @@ class MainActivity : AppCompatActivity() {
 
     /** 收到设备推送（LocalEventServer 回调，已在主线程） */
     private fun handleIncomingEvent(remote: String, sid: String?, nts: String?, body: String) {
+        Log.d(TAG, "[EVENT] from=$remote sid=$sid nts=$nts body=${body.take(400)}")
         appendLog("◀ 事件推送 from $remote NTS=${nts ?: "?"} SID=${sid ?: "?"}")
         val props = EventProperties.parse(body)
         if (props.isEmpty()) {
@@ -860,60 +1039,25 @@ class MainActivity : AppCompatActivity() {
     }
 
     // ------------------------------------------------------------------
-    // 日志（缓冲 + 定时批量刷新到 TextView）
-    // 千万不要逐条 tvLog.append()：TextView 每 append/setText 一次都要对整个
-    // 文本重新布局，日志一长（哪怕几千行）主线程就会被拖死导致"无响应"。
+    // 历史说明：这里曾是"缓冲 + 定时批量刷新到 TextView"的 UI 日志。
+    // UI 日志区已在第 6 课后移除（设备多时看不过来），排查请用 logcat：
+    //     adb logcat -s MyUPNP
+    // appendLog 保留空实现，是为了不逐个改几十处历史调用点。
     // ------------------------------------------------------------------
+    @Suppress("unused")
     private fun appendLog(line: String) {
-        logBuffer.append(line).append('\n')
-        // 只保留尾部 MAX_LOG_CHARS 字符，防止日志无限增长
-        if (logBuffer.length > MAX_LOG_CHARS * 2) {
-            logBuffer.delete(0, logBuffer.length - MAX_LOG_CHARS)
-        }
-        if (!logFlushPending) {
-            logFlushPending = true
-            mainHandler.postDelayed({ flushLog() }, LOG_FLUSH_MS)
-        }
-    }
-
-    /** 把缓冲里的日志一次性刷到界面（节流后每秒最多 LOG_FLUSH_MS 一次） */
-    private fun flushLog() {
-        logFlushPending = false
-        if (logBuffer.isEmpty()) return
-        tvLog.text = logBuffer.toString()
-        scrollLog.post { scrollLog.fullScroll(ScrollView.FOCUS_DOWN) }
-    }
-
-    private fun formatSsdpMessage(m: com.example.myupnp.ssdp.SsdpMessage): String {
-        val typeName = when (m.type) {
-            SsdpMessageType.SEARCH_RESPONSE -> "搜索应答"
-            SsdpMessageType.NOTIFY_ALIVE -> "设备上线 NOTIFY"
-            SsdpMessageType.NOTIFY_BYEBYE -> "设备下线 NOTIFY"
-            SsdpMessageType.OTHER -> "其他"
-        }
-        val sb = StringBuilder()
-        sb.append("[$typeName] from ${m.sourceHost}\n")
-        for ((k, v) in m.headers) {
-            sb.append("    $k: $v\n")
-        }
-        return sb.toString().trimEnd()
+        // UI 日志已移除：统一走 logcat（关键节点均已打点）
     }
 
     companion object {
-        /** 日志最多保留的尾部字符数（内存缓冲按 2 倍裁剪，界面最多显示这么多） */
-        private const val MAX_LOG_CHARS = 60_000
-
-        /** 相同报文(类型+USN)的最短打印间隔，防止设备多的局域网刷屏 */
-        private const val LOG_COOLDOWN_MS = 10_000L
-
-        /** 日志批量刷屏周期：攒够这段时间的日志再一次写到 TextView */
-        private const val LOG_FLUSH_MS = 350L
-
         /** 填参数时预填的常见默认值（DLNA 媒体设备几乎都长这样） */
         private val DEFAULT_ARGS = mapOf(
             "InstanceID" to "0",   // AVTransport/RenderingControl 的实例号
             "Speed" to "1",        // Play 的播放速度
             "Channel" to "Master"  // RenderingControl 的音量通道
         )
+
+        /** logcat 统一 TAG：adb logcat -s MyUPNP 过滤 */
+        private const val TAG = "MyUPNP"
     }
 }

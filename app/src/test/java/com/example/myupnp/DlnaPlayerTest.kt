@@ -66,6 +66,19 @@ class DlnaPlayerTest {
         assertTrue(didl.contains("<dc:title>Demo &amp; Test</dc:title>")) // XML 转义
         assertTrue(didl.contains("http://192.168.1.5/a.mp4"))
         assertTrue(didl.contains("object.item.videoItem"))
+        assertTrue(didl.contains("http-get:*:video/mp4:*"))
+    }
+
+    @Test
+    fun didlMetadata_infersAudioForSpeaker() {
+        // 给音箱推音频：.mp3 应识别为 audioItem + audio/mpeg（而非视频）
+        val didl = DlnaPlayer.didlMetadata("http://192.168.1.5/song.mp3", "My Song")
+        assertTrue(didl.contains("object.item.audioItem"))
+        assertTrue(didl.contains("http-get:*:audio/mpeg:*"))
+        assertTrue(!didl.contains("videoItem"))
+        // 未知扩展名默认也按音频
+        val unknown = DlnaPlayer.didlMetadata("http://192.168.1.5/stream?id=7", "Radio")
+        assertTrue(unknown.contains("object.item.audioItem"))
     }
 
     @Test
