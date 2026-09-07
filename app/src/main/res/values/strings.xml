@@ -7,4 +7,5 @@
     <string name="status_scanning">正在扫描 SSDP 组播组 239.255.255.250:1900 …</string>
     <string name="device_title">发现的设备</string>
     <string name="nearby_wifi_rationale">需要「附近的设备」权限以在局域网中发现 UPnP 设备</string>
+    <string name="now_playing_hint">未在播放 — 点歌后可在此控制</string>
 </resources>

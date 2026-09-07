@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 底部"正在播放"控制条的圆角背景（固定浅色，配套固定深色文字） -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <corners android:radius="12dp" />
+    <solid android:color="@color/now_bar_bg" />
+    <stroke
+        android:width="1dp"
+        android:color="@color/now_bar_border" />
+</shape>

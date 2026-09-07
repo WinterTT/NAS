@@ -2,4 +2,12 @@
 <resources>
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
+
+    <!-- ===== 底部"正在播放"控制条固定配色（不随 DayNight 主题变化） ===== -->
+    <!-- 卡片背景固定浅色，则上面的文字/图标必须固定深色，否则夜间模式浅字配浅底看不清 -->
+    <color name="now_bar_bg">#FFF5F5F7</color>
+    <color name="now_bar_border">#DDDDDD</color>
+    <color name="now_bar_text">#FF202124</color>
+    <color name="now_bar_subtext">#FF5F6368</color>
+    <color name="now_bar_button_disabled">#FF9AA0A6</color>
 </resources>
