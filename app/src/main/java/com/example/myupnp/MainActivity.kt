@@ -25,10 +25,12 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.lifecycle.lifecycleScope
 import com.example.myupnp.device.ScpdLoader
 import com.example.myupnp.dlna.ContentDirectoryClient
 import com.example.myupnp.dlna.DlnaPlayer
@@ -43,6 +45,7 @@ import com.example.myupnp.model.UpnpDevice
 import com.example.myupnp.model.UpnpService
 import com.example.myupnp.soap.SoapCaller
 import com.example.myupnp.ssdp.SsdpDiscovery
+import kotlinx.coroutines.launch
 import java.net.Inet4Address
 import java.net.URL
 import java.util.concurrent.Executors
@@ -60,6 +63,9 @@ import java.util.concurrent.Executors
  * 组播帧交给应用（默认硬件层就丢了）。
  */
 class MainActivity : AppCompatActivity() {
+
+    /** MVVM：ViewModel 持有 UI 状态（扫描/设备数/正在播放摘要） */
+    private val vm: MainViewModel by viewModels()
 
     private lateinit var tvStatus: TextView
     private lateinit var tvDeviceTitle: TextView
@@ -203,7 +209,7 @@ class MainActivity : AppCompatActivity() {
         if (!userWantsScan) return
         if (!discovery.isRunning()) return
         releaseScanResources("Wi-Fi 断开")
-        tvStatus.text = "Wi-Fi 断开，等待重连后自动续扫…"
+        vm.setStatusOverride("Wi-Fi 断开，等待重连后自动续扫…")
     }
 
     /** Wi-Fi 拿到 IP（连接就绪 / 或同网段换 IP） */
@@ -372,6 +378,25 @@ class MainActivity : AppCompatActivity() {
         btnNowVolUp.setOnClickListener { volumeStepNow(10) }
         updateNowPlayingBar() // 初始：无播放会话，保持隐藏
 
+        // ===== MVVM（第 1 批）：UI 观察 ViewModel 状态 =====
+        lifecycleScope.launch {
+            vm.uiState.collect { s ->
+                // 扫描按钮可用性 & 状态栏
+                btnStart.isEnabled = !s.scanning
+                btnStop.isEnabled = s.scanning
+                if (s.statusOverride != null) {
+                    tvStatus.text = s.statusOverride
+                } else if (s.statusText != null) {
+                    tvStatus.setText(s.statusText)
+                }
+                // 设备标题计数（列表行内容仍走 adapter，计数这里统一）
+                tvDeviceTitle.text =
+                    getString(R.string.device_title) + "  (${s.deviceCount})"
+            }
+        }
+        // 初始把当前设备数同步进 VM（避免进入界面时计数为 0 闪烁）
+        vm.setDeviceCount(registry.size)
+
         Log.i(TAG, "[UI] MyUPNP 启动完成，等待用户操作")
 
         // A2：只监听 Wi-Fi 网络（蜂窝/5G 变化不会误触发）
@@ -414,9 +439,8 @@ class MainActivity : AppCompatActivity() {
             appendLog(">> 本机回调地址: ${cb ?: "（无法确定 IP）"}")
         }
 
-        btnStart.isEnabled = false
-        btnStop.isEnabled = true
-        tvStatus.setText(R.string.status_scanning)
+        vm.setStatusOverride(null) // 清掉"Wi-Fi 断开"这类临时文案
+        vm.setScanning(true, R.string.status_scanning)
         // 心跳清理只在扫描期间跑
         mainHandler.removeCallbacks(heartbeatRunnable)
         mainHandler.postDelayed(heartbeatRunnable, HEARTBEAT_INTERVAL_MS)
@@ -435,9 +459,7 @@ class MainActivity : AppCompatActivity() {
         multicastLock = null
         unsubscribeAll()       // 第 3 课：退出前先跟设备说再见
         eventServer.stop()     // 关掉回调服务器
-        btnStart.isEnabled = true
-        btnStop.isEnabled = false
-        tvStatus.setText(R.string.status_idle)
+        vm.setScanning(false, R.string.status_idle)
         appendLog(">> 已停止扫描")
     }
 
@@ -1156,7 +1178,7 @@ class MainActivity : AppCompatActivity() {
         appendGroup("其他设备（${others.size}）", others)
 
         adapter.notifyDataSetChanged()
-        tvDeviceTitle.text = getString(R.string.device_title) + "  (${registry.size})"
+        vm.setDeviceCount(registry.size) // 观察者负责更新标题
     }
 
     /** 一台设备的多行展示文本 */
