@@ -12,7 +12,6 @@ import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
-import android.os.Looper
 import android.util.Log
 import android.view.View
 import android.view.ViewGroup
@@ -48,7 +47,6 @@ import com.example.myupnp.ssdp.SsdpDiscovery
 import kotlinx.coroutines.launch
 import java.net.Inet4Address
 import java.net.URL
-import java.util.concurrent.Executors
 
 /**
  * 第 1 课：UPnP 控制点 —— 设备发现 + 设备描述
@@ -82,7 +80,14 @@ class MainActivity : AppCompatActivity() {
     private lateinit var btnNowVolDown: ImageButton
     private lateinit var btnNowVolUp: ImageButton
 
-    private val mainHandler = Handler(Looper.getMainLooper())
+    // ===== MVVM 第 2 批：对象与线程池全部归 ViewModel，Activity 只引用 =====
+    private val mainHandler: Handler get() = vm.mainHandler
+    private val fetchExecutor get() = vm.fetchExecutor
+    private val controlExecutor get() = vm.controlExecutor
+    private val registry: DeviceRegistry get() = vm.registry
+    private val nowSession: NowPlayingSession get() = vm.nowSession
+    private val subManager: SubscriptionManager get() = vm.subManager
+
     private val discovery = SsdpDiscovery(object : SsdpDiscovery.Listener {
         override fun onSsdpMessage(message: com.example.myupnp.ssdp.SsdpMessage) {
             mainHandler.post { handleSsdpMessage(message) }
@@ -101,44 +106,8 @@ class MainActivity : AppCompatActivity() {
 
     private var multicastLock: WifiManager.MulticastLock? = null
 
-    // ===== 重构后：把"发现状态 + 设备存储"委托给 DeviceRegistry =====
-    // 注意声明顺序：fetchExecutor 必须先于 registry（构造参数）
-    private val fetchExecutor = Executors.newSingleThreadExecutor { r ->
-        Thread(r, "description-fetch").apply { isDaemon = true }
-    }
-
-    /** SCPD/SOAP 控制请求的线程池（与描述抓取分开，避免互相排队拖慢） */
-    private val controlExecutor = Executors.newSingleThreadExecutor { r ->
-        Thread(r, "soap-control").apply { isDaemon = true }
-    }
-
-    /** 设备注册表：设备增删/心跳/描述拉取都在这，UI 只读它 */
-    private val registry = DeviceRegistry(
-        mainHandler = mainHandler,
-        fetchExecutor = fetchExecutor,
-        listener = object : DeviceRegistry.Listener {
-            override fun onRegistryChanged() {
-                requestRefresh()
-            }
-        }
-    )
-
-    /** 当前播放会话（重构后独立成类 NowPlayingSession.kt） */
-    private val nowSession = NowPlayingSession(
-        mainHandler = mainHandler,
-        controlExecutor = controlExecutor,
-        listener = object : NowPlayingSession.Listener {
-            override fun onChanged(session: NowPlayingSession) {
-                updateNowPlayingBar()
-            }
-        }
-    )
-
     private val deviceItems = ArrayList<DeviceListItem>()
     private lateinit var adapter: DeviceListAdapter
-
-    /** 列表刷新合并：消息风暴时每帧最多真正刷新一次 */
-    private var refreshQueued = false
 
     /**
      * 心跳清理定时器：定期把"很久没消息"的设备移除。
@@ -269,11 +238,12 @@ class MainActivity : AppCompatActivity() {
         eventServer.stop()
         registry.clearAll()
         clearNowPlayingIfDeviceGone() // 断网/停扫：正在播的设备没了，收起控制条
-        requestRefresh()
     }
 
     // ------------------------------------------------------------------
     // 第 3 课：GENA 事件订阅状态
+    // 订阅管理器已收进 ViewModel（见 MainViewModel.subManager）；
+    // 这里只保留回调服务器（收 NOTIFY）与消息 Toast 的订阅
     // ------------------------------------------------------------------
 
     /** App 内嵌的回调服务器：收设备 NOTIFY 推送 */
@@ -286,21 +256,6 @@ class MainActivity : AppCompatActivity() {
             mainHandler.post { appendLog("  · $info") }
         }
     })
-
-    /** GENA 事件订阅管理器（重构后独立成类，见 SubscriptionManager.kt） */
-    private val subManager = SubscriptionManager(
-        mainHandler = mainHandler,
-        controlExecutor = controlExecutor,
-        listener = object : SubscriptionManager.Listener {
-            override fun onInfo(message: String) {
-                Toast.makeText(this@MainActivity, message, Toast.LENGTH_SHORT).show()
-            }
-
-            override fun onError(message: String) {
-                Toast.makeText(this@MainActivity, message, Toast.LENGTH_LONG).show()
-            }
-        }
-    )
 
     // ---- Android 13+ 需要运行时申请 NEARBY_WIFI_DEVICES ----
     private val nearbyPermissionLauncher =
@@ -360,7 +315,6 @@ class MainActivity : AppCompatActivity() {
         findViewById<Button>(R.id.btnClear).setOnClickListener {
             registry.clearAll()
             clearNowPlayingIfDeviceGone()
-            requestRefresh()
         }
 
         // ===== 第 7 课 A：底部"正在播放"控制条 =====
@@ -376,9 +330,9 @@ class MainActivity : AppCompatActivity() {
         btnNowStop.setOnClickListener { stopNowPlaying() }
         btnNowVolDown.setOnClickListener { volumeStepNow(-10) }
         btnNowVolUp.setOnClickListener { volumeStepNow(10) }
-        updateNowPlayingBar() // 初始：无播放会话，保持隐藏
 
-        // ===== MVVM（第 1 批）：UI 观察 ViewModel 状态 =====
+        // ===== MVVM：UI 观察 ViewModel 状态（第 1+2 批） =====
+        // 通用 UI 状态：扫描按钮/状态栏/计数/正在播放控制条
         lifecycleScope.launch {
             vm.uiState.collect { s ->
                 // 扫描按钮可用性 & 状态栏
@@ -389,13 +343,44 @@ class MainActivity : AppCompatActivity() {
                 } else if (s.statusText != null) {
                     tvStatus.setText(s.statusText)
                 }
-                // 设备标题计数（列表行内容仍走 adapter，计数这里统一）
+                // 设备标题计数
                 tvDeviceTitle.text =
                     getString(R.string.device_title) + "  (${s.deviceCount})"
+                // 正在播放控制条
+                if (s.nowPlayingActive) {
+                    nowPlayingBar.visibility = View.VISIBLE
+                    tvNowDevice.text = s.nowPlayingDevice
+                    tvNowTitle.text = s.nowPlayingTitle
+                    btnNowPlayPause.setImageResource(
+                        if (s.nowPlayingPlaying) R.drawable.ic_pause else R.drawable.ic_play
+                    )
+                    btnNowVolDown.isEnabled = s.nowPlayingHasRc
+                    btnNowVolUp.isEnabled = s.nowPlayingHasRc
+                    val volAlpha = if (s.nowPlayingHasRc) 1.0f else 0.3f
+                    btnNowVolDown.alpha = volAlpha
+                    btnNowVolUp.alpha = volAlpha
+                } else {
+                    nowPlayingBar.visibility = View.GONE
+                }
             }
         }
-        // 初始把当前设备数同步进 VM（避免进入界面时计数为 0 闪烁）
-        vm.setDeviceCount(registry.size)
+        // 设备列表行（由 registry.listener → VM.deviceRows 驱动）
+        lifecycleScope.launch {
+            vm.deviceRows.collect { rows ->
+                deviceItems.clear()
+                deviceItems.addAll(rows)
+                adapter.notifyDataSetChanged()
+            }
+        }
+        // 一次性消息（订阅/退订等提示）
+        lifecycleScope.launch {
+            vm.messages.collect { msg ->
+                Toast.makeText(
+                    this@MainActivity, msg.text,
+                    if (msg.isError) Toast.LENGTH_LONG else Toast.LENGTH_SHORT
+                ).show()
+            }
+        }
 
         Log.i(TAG, "[UI] MyUPNP 启动完成，等待用户操作")
 
@@ -478,8 +463,7 @@ class MainActivity : AppCompatActivity() {
         multicastLock = null
         unsubscribeAll()
         eventServer.stop()
-        fetchExecutor.shutdownNow()
-        controlExecutor.shutdownNow()
+        // executor 由 MainViewModel.onCleared 统一释放
         super.onDestroy()
     }
 
@@ -494,7 +478,7 @@ class MainActivity : AppCompatActivity() {
                 "usn=${message.usn ?: "-"} loc=${message.location ?: "-"} " +
                 "nt=${message.nt ?: "-"}"
         )
-        // 登记/刷新/移除全交给注册表；它变化时会回调 onRegistryChanged -> requestRefresh
+        // 登记/刷新/移除全交给注册表；变化经 ViewModel.rebuildDeviceRows 驱动列表
         registry.onSsdpMessage(message)
     }
 
@@ -512,16 +496,6 @@ class MainActivity : AppCompatActivity() {
             }
         }
         clearNowPlayingIfDeviceGone()
-    }
-
-    /** 合并列表刷新：同帧内多次请求只刷一次（设备多时消息很密集） */
-    private fun requestRefresh() {
-        if (refreshQueued) return
-        refreshQueued = true
-        mainHandler.post {
-            refreshQueued = false
-            refreshDeviceList()
-        }
     }
 
     // ------------------------------------------------------------------
@@ -734,27 +708,6 @@ class MainActivity : AppCompatActivity() {
         title: String
     ) {
         nowSession.begin(deviceName, avt, rc, title)
-    }
-
-    /** 根据会话状态刷新控制条文字/按钮 */
-    private fun updateNowPlayingBar() {
-        val np = nowSession.current
-        if (np == null) {
-            nowPlayingBar.visibility = View.GONE
-            return
-        }
-        nowPlayingBar.visibility = View.VISIBLE
-        tvNowDevice.text = np.deviceName
-        tvNowTitle.text = np.title
-        // 图标切换：播放中显示"暂停"，可播时显示"播放"
-        btnNowPlayPause.setImageResource(if (np.playing) R.drawable.ic_pause else R.drawable.ic_play)
-        // RenderingControl 不存在时音量按钮置灰（矢量图标里是黑，禁用时降透明度）
-        val hasRc = np.rc != null
-        btnNowVolDown.isEnabled = hasRc
-        btnNowVolUp.isEnabled = hasRc
-        val volAlpha = if (hasRc) 1.0f else 0.3f
-        btnNowVolDown.alpha = volAlpha
-        btnNowVolUp.alpha = volAlpha
     }
 
     /** 播放/暂停切换 → 转发给会话 */
@@ -1146,55 +1099,6 @@ class MainActivity : AppCompatActivity() {
             } else {
                 appendLog("   $name = $value")
             }
-        }
-    }
-
-    // ------------------------------------------------------------------
-    // UI 刷新
-    // ------------------------------------------------------------------
-
-    /** 重新生成分组列表：MediaServer 一组，其它一组 */
-    private fun refreshDeviceList() {
-        deviceItems.clear()
-
-        // 先按类型分桶，保持每桶内按发现顺序
-        val mediaServer = ArrayList<Entry>()
-        val others = ArrayList<Entry>()
-        for (entry in registry.all()) {
-            val device = entry.device
-            if (device != null && DeviceRegistry.isMediaServer(device)) mediaServer.add(entry)
-            else others.add(entry)
-        }
-
-        fun appendGroup(title: String, group: List<Entry>) {
-            if (group.isEmpty()) return
-            deviceItems += DeviceListItem.Header(title)
-            for (entry in group) {
-                deviceItems += DeviceListItem.DeviceItem(entry.location, formatDeviceText(entry))
-            }
-        }
-
-        appendGroup("📦 MediaServer（${mediaServer.size}）", mediaServer)
-        appendGroup("其他设备（${others.size}）", others)
-
-        adapter.notifyDataSetChanged()
-        vm.setDeviceCount(registry.size) // 观察者负责更新标题
-    }
-
-    /** 一台设备的多行展示文本 */
-    private fun formatDeviceText(entry: Entry): String {
-        val device = entry.device
-        return if (device != null) {
-            "${device.friendlyName.ifEmpty { "（未命名）" }}\n" +
-                "  型号: ${device.modelName.ifEmpty { "?" }} | " +
-                "制造商: ${device.manufacturer.ifEmpty { "?" }}\n" +
-                "  类型: ${device.deviceType.substringAfterLast(':').ifEmpty { device.deviceType }}\n" +
-                "  服务(${device.services.size}): " +
-                device.services.joinToString(", ") { it.serviceType.substringAfterLast(':') } +
-                "\n  @ ${entry.location}"
-        } else {
-            "（等待描述…）\n  USN: ${entry.usn ?: "?"}\n  @ ${entry.location}" +
-                if (entry.failed) "\n  描述获取失败" else ""
         }
     }
 
