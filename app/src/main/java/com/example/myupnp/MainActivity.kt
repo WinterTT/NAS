@@ -84,6 +84,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var btnNowPrev: ImageButton
     private lateinit var btnNowNext: ImageButton
     private lateinit var tvNowQueue: TextView
+    private lateinit var tvQueueEntry: TextView
 
     /** 用户正在拖动进度条（避免 ticker 抢进度） */
     private var seekDragging = false
@@ -165,6 +166,7 @@ class MainActivity : AppCompatActivity() {
 
         tvStatus = findViewById(R.id.tvStatus)
         tvDeviceTitle = findViewById(R.id.tvDeviceTitle)
+        tvQueueEntry = findViewById(R.id.tvQueueEntry)
         listDevices = findViewById(R.id.listDevices)
         btnStart = findViewById(R.id.btnStart)
         btnStop = findViewById(R.id.btnStop)
@@ -226,6 +228,8 @@ class MainActivity : AppCompatActivity() {
         btnNowPrev.setOnClickListener { vm.queuePreviousItem() }
         btnNowNext.setOnClickListener { vm.queueNextItem() }
         tvNowQueue.setOnClickListener { showQueueDialog() }
+        // 首页常驻队列入口（没在播放也能点开队列）
+        tvQueueEntry.setOnClickListener { showQueueDialog() }
 
         // 进度条：拖动中不更新（ticker 停手），松手发 Seek
         seekNow.setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
@@ -264,6 +268,19 @@ class MainActivity : AppCompatActivity() {
                 // 设备标题计数
                 tvDeviceTitle.text =
                     getString(R.string.device_title) + "  (${s.deviceCount})"
+                // 首页队列入口：队列有内容才显示（没在播放也能点开）
+                if (s.queueHasItems) {
+                    tvQueueEntry.visibility = View.VISIBLE
+                    tvQueueEntry.text = buildString {
+                        append("播放队列：")
+                        if (s.queuePendingCount > 0) append("待播 ${s.queuePendingCount} 首，")
+                        if (s.queueCurrentTitle.isNotEmpty()) append("当前《${s.queueCurrentTitle}》")
+                        else append("当前无")
+                        append(" —— 点此查看/切歌")
+                    }
+                } else {
+                    tvQueueEntry.visibility = View.GONE
+                }
                 // 正在播放控制条
                 if (s.nowPlayingActive) {
                     nowPlayingBar.visibility = View.VISIBLE
@@ -404,81 +421,139 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * 曲库浏览器：从根开始逐层 Browse，点歌曲推给播放器。
-     * 用简单对话框做导航，breadcrumb 保留当前路径用于"返回上级"。
+     * 曲库浏览器：常驻对话框，从根开始逐层 Browse。
+     * 点文件夹进入下一层、点歌曲弹"播放/加入队列"——但对话框始终不关，
+     * 可以一口气连点好多首排队，不用反复重进曲库。
      */
     private fun showMediaBrowser(cds: UpnpService) {
-        showMediaLevel(cds, ContentDirectoryClient.ROOT_OBJECT_ID, emptyList())
-    }
+        // 浏览状态：当前层 objectId + 面包屑 (id, 标题) 栈（最右为当前层）
+        var objectId = ContentDirectoryClient.ROOT_OBJECT_ID
+        val crumb = ArrayList<Pair<String, String>>()
 
-    private fun showMediaLevel(
-        cds: UpnpService,
-        objectId: String,
-        crumb: List<Pair<String, String>> // (id, 标题) 栈，最右为当前层
-    ) {
-        appendLog(">> Browse ${crumb.lastOrNull()?.second ?: "根目录"} ($objectId) @ ${cds.controlUrl}")
-        Log.d(
-            TAG,
-            "[CDS>] Browse objectId=$objectId ctrl=${cds.controlUrl} serviceType=${cds.serviceType}"
-        )
-        val dialog = AlertDialog.Builder(this)
-            .setTitle(crumb.lastOrNull()?.second ?: "媒体库")
-            .setMessage("正在加载…")
-            .setNegativeButton("关闭", null)
-            .show()
+        val listView = ListView(this).apply {
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                0,
+                1f
+            )
+        }
+        val btnBack = Button(this).apply { text = "返回上级" }
+        val btnClose = Button(this).apply { text = "关闭浏览器" }
+        val bottom = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            addView(btnBack, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            addView(btnClose, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        }
+        val panel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(24, 8, 24, 8)
+            addView(listView)
+            addView(bottom)
+        }
 
-        controlExecutor.execute {
-            val out = ContentDirectoryClient.browse(cds, objectId)
-            mainHandler.post {
-                if (dialog.isShowing) dialog.dismiss()
-                if (!out.ok) {
-                    Log.e(TAG, "[CDS!] Browse 失败 objectId=$objectId: ${out.error}")
-                    if (out.rawSnippet.isNotBlank()) Log.e(TAG, "[CDS!] 响应片段: ${out.rawSnippet}")
-                    appendLog("!! Browse 失败: ${out.error}")
-                    if (out.rawSnippet.isNotBlank()) appendLog("   响应片段: ${out.rawSnippet}")
-                    Toast.makeText(this, "Browse 失败: ${out.error}", Toast.LENGTH_LONG).show()
-                    return@post
-                }
-                if (out.objects.isEmpty()) {
-                    Log.w(TAG, "[CDS] Browse 成功但目录为空 objectId=$objectId")
-                    appendLog("  该目录为空（没有子项）")
-                    Toast.makeText(this, "目录是空的", Toast.LENGTH_SHORT).show()
-                    return@post
-                }
-                Log.i(
-                    TAG,
-                    "[CDS<] Browse 返回 ${out.objects.size} 项: " +
-                        out.objects.joinToString(", ") { "${it.title}[${if (it.isContainer) "dir" else "file"}]" }
-                )
+        // 一个可变适配器：目录/歌曲/状态行都往里面填
+        val labels = ArrayList<String>()
+        val rowActions = ArrayList<() -> Unit>()
+        val listAdapter = ArrayAdapter(this, android.R.layout.simple_list_item_1, labels)
+        listView.adapter = listAdapter
 
-                // 组装菜单：前面加"返回上级"
-                val labels = ArrayList<String>()
-                val itemActions = ArrayList<() -> Unit>()
-                if (crumb.isNotEmpty()) {
-                    labels += "⬅ 返回上级"
-                    itemActions += {
-                        val parent = crumb.last()
-                        showMediaLevel(cds, parent.first, crumb.dropLast(1))
+        fun fillLoading(text: String) {
+            labels.clear(); rowActions.clear()
+            labels.add(text); rowActions.add {}
+            listAdapter.notifyDataSetChanged()
+        }
+
+        fun reload() {
+            val dirName = crumb.lastOrNull()?.second ?: "媒体库"
+            appendLog(">> Browse $dirName ($objectId) @ ${cds.controlUrl}")
+            Log.d(TAG, "[CDS>] Browse objectId=$objectId ctrl=${cds.controlUrl}")
+            fillLoading("正在加载…")
+            btnBack.isEnabled = crumb.isNotEmpty()
+            controlExecutor.execute {
+                val out = ContentDirectoryClient.browse(cds, objectId)
+                mainHandler.post {
+                    if (!out.ok) {
+                        Log.e(TAG, "[CDS!] Browse 失败 objectId=$objectId: ${out.error}")
+                        appendLog("!! Browse 失败: ${out.error}")
+                        if (out.rawSnippet.isNotBlank()) appendLog("   响应片段: ${out.rawSnippet}")
+                        fillLoading("Browse 失败：${out.error}")
+                        return@post
                     }
-                }
-                for (obj in out.objects) {
-                    labels += obj.displayText()
-                    if (obj is MediaContainer) {
-                        itemActions += { showMediaLevel(cds, obj.id, crumb + (obj.id to obj.title)) }
-                    } else if (obj is MediaItem) {
-                        itemActions += { mediaItemOptions(obj) }
+                    if (out.objects.isEmpty()) {
+                        appendLog("  该目录为空（没有子项）")
+                        fillLoading("（这个目录是空的）")
+                        return@post
                     }
-                }
-
-                AlertDialog.Builder(this)
-                    .setTitle(crumb.lastOrNull()?.second ?: "媒体库")
-                    .setItems(labels.toTypedArray()) { _, which ->
-                        itemActions[which]()
+                    Log.i(
+                        TAG,
+                        "[CDS<] Browse 返回 ${out.objects.size} 项: " +
+                            out.objects.joinToString(", ") { "${it.title}[${if (it.isContainer) "dir" else "file"}]" }
+                    )
+                    // 组装这一层的可点行
+                    labels.clear()
+                    rowActions.clear()
+                    for (obj in out.objects) {
+                        labels.add(obj.displayText())
+                        if (obj is MediaContainer) {
+                            rowActions.add {
+                                crumb.add(obj.id to obj.title)
+                                objectId = obj.id
+                                reload()
+                            }
+                        } else if (obj is MediaItem) {
+                            rowActions.add { mediaItemOptions(obj) }
+                        } else {
+                            rowActions.add {}
+                        }
                     }
-                    .setNegativeButton("关闭", null)
-                    .show()
+                    listAdapter.notifyDataSetChanged()
+                }
             }
         }
+
+        btnBack.setOnClickListener {
+            if (crumb.isEmpty()) {
+                Toast.makeText(this, "已经在根目录了", Toast.LENGTH_SHORT).show()
+            } else {
+                val parent = crumb.removeAt(crumb.size - 1)
+                objectId = parent.first
+                reload()
+            }
+        }
+
+        listView.setOnItemClickListener { _, _, which, _ ->
+            rowActions.getOrNull(which)?.invoke()
+        }
+
+        AlertDialog.Builder(this)
+            .setTitle("媒体库（点歌排队，可连续操作）")
+            .setView(panel)
+            .setNegativeButton("关闭", null)
+            .show()
+        reload()
+    }
+
+    /** 曲库里点一首歌：先问"立即播放 / 加入队列"，再决定走哪条路（浏览器不关闭） */
+    private fun mediaItemOptions(item: MediaItem) {
+        if (item.resUrl.isBlank()) {
+            Toast.makeText(this, "该条目没有可播放地址(res)", Toast.LENGTH_SHORT).show()
+            return
+        }
+        AlertDialog.Builder(this)
+            .setTitle(item.title)
+            .setItems(
+                arrayOf(
+                    "立即播放",
+                    "加入队列（播完自动连播）"
+                )
+            ) { _, which ->
+                when (which) {
+                    0 -> playMediaItemFromServer(item)
+                    1 -> vm.queueEnqueue(item)
+                }
+            }
+            .setNegativeButton("取消", null)
+            .show()
     }
 
     /** 曲库里点歌：弹出"选设备播放"框（可刷新设备列表，设备没找到也能重扫） */
@@ -573,29 +648,6 @@ class MainActivity : AppCompatActivity() {
         btnRefresh.setOnClickListener { refresh() }
     }
 
-    /** 曲库里点一首歌：先问"立即播放 / 加入队列"，再决定走哪条路 */
-    private fun mediaItemOptions(item: MediaItem) {
-        if (item.resUrl.isBlank()) {
-            Toast.makeText(this, "该条目没有可播放地址(res)", Toast.LENGTH_SHORT).show()
-            return
-        }
-        AlertDialog.Builder(this)
-            .setTitle(item.title)
-            .setItems(
-                arrayOf(
-                    "立即播放",
-                    "加入队列（播完自动连播）"
-                )
-            ) { _, which ->
-                when (which) {
-                    0 -> playMediaItemFromServer(item)
-                    1 -> vm.queueEnqueue(item)
-                }
-            }
-            .setNegativeButton("取消", null)
-            .show()
-    }
-
     /** 队列总览：正在播 + 接下来 N 首；点待播一首 = 立即切到它 */
     private fun showQueueDialog() {
         val queue = vm.playbackQueue
@@ -603,18 +655,30 @@ class MainActivity : AppCompatActivity() {
         val rows = ArrayList<String>()
         val actions = ArrayList<(() -> Unit)?>()
 
-        queue.current?.let {
-            rows += "▶ 正在播放：《${it.title}》"
-            actions += null
+        val cur = queue.current
+        when {
+            cur == null -> Unit
+            nowSession.isActive -> {
+                rows += "▶ 正在播放：《${cur.title}》"
+                actions += null
+            }
+            else -> {
+                rows += "▶ 当前：《${cur.title}》（还没开播/播放目标已不在）"
+                actions += null
+            }
         }
         if (pending.isEmpty()) {
-            rows += if (queue.hasActivity) "—— 接下来没有了 ——"
+            rows += if (queue.hasActivity) "—— 没有待播的了 ——"
             else "队列是空的：去曲库点歌选「加入队列」"
             actions += null
         } else {
-            for ((i, it) in pending.withIndex()) {
-                rows += "${i + 1}. ${it.title}"
-                actions += { vm.queuePlayPendingAt(i) }
+            if (!nowSession.isActive) {
+                rows += "（尚未开播：点下面的歌会先让你选播放设备）"
+                actions += null
+            }
+            for ((i, item) in pending.withIndex()) {
+                rows += "${i + 1}. ${item.title}"
+                actions += { playQueueRow(item, i) }
             }
         }
         if (queue.historyCount > 0) {
@@ -629,6 +693,16 @@ class MainActivity : AppCompatActivity() {
             .setNeutralButton("清空队列") { _, _ -> vm.queueClear() }
             .setNegativeButton("关闭", null)
             .show()
+    }
+
+    /** 队列里点一首：有播放目标就直接切过去；还没有就先走"选设备播放" */
+    private fun playQueueRow(item: MediaItem, indexInQueue: Int) {
+        if (nowSession.isActive) {
+            vm.queuePlayPendingAt(indexInQueue)
+        } else {
+            Toast.makeText(this, "还没有播放目标：请选择这首歌播到哪台设备", Toast.LENGTH_SHORT).show()
+            playMediaItemFromServer(item) // 选设备推送成功后自动记成"当前"，播完接续连播
+        }
     }
 
     /** 真正推送一首歌到指定播放器（含日志、结果、自动订阅 + 显示控制条） */

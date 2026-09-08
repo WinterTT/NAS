@@ -443,6 +443,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val queuePendingCount: Int = 0,
         /** 播放队列：当前这首的标题（队列来源时显示） */
         val queueCurrentTitle: String = "",
+        /** 播放队列：是否已有内容（决定首页"队列入口"显不显示） */
+        val queueHasItems: Boolean = false,
     )
 
     private val _uiState = MutableStateFlow(UiState())
@@ -523,6 +525,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 volume = np?.volume,
                 queuePendingCount = playbackQueue.pendingCount,
                 queueCurrentTitle = playbackQueue.current?.title.orEmpty(),
+                queueHasItems = playbackQueue.hasActivity,
             )
         }
         // 有会话就记忆"上次在播什么"（重启后恢复用）
@@ -543,6 +546,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             it.copy(
                 queuePendingCount = playbackQueue.pendingCount,
                 queueCurrentTitle = playbackQueue.current?.title.orEmpty(),
+                queueHasItems = playbackQueue.hasActivity,
             )
         }
     }

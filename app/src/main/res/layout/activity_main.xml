@@ -54,6 +54,25 @@
         android:textColor="?android:attr/textColorSecondary"
         android:textSize="13sp" />
 
+    <!-- 第 7 课 B：首页常驻的"播放队列"入口（没在播放也能看到/点进队列） -->
+    <TextView
+        android:id="@+id/tvQueueEntry"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:background="@drawable/bg_now_bar"
+        android:drawableStart="@drawable/ic_queue"
+        android:drawablePadding="6dp"
+        android:drawableTint="@color/now_bar_text"
+        android:gravity="center_vertical"
+        android:paddingHorizontal="10dp"
+        android:paddingVertical="6dp"
+        android:text="播放队列"
+        android:textColor="@color/now_bar_text"
+        android:textSize="12sp"
+        android:visibility="gone"
+        tools:visibility="gone" />
+
     <ListView
         android:id="@+id/listDevices"
         android:layout_width="match_parent"
