@@ -521,19 +521,27 @@ class MainActivity : AppCompatActivity() {
         }
 
         // 空/多台都弹同一个框：空时列表空，靠"刷新"按钮找设备
+        // 注意：ListView 必须占固定权重高度（不能 wrap_content），
+        // 否则设备一多会把下方"刷新"按钮挤出对话框可视区。
+        val btnRefresh = Button(this).apply { text = "🔄 刷新设备列表" }
         val listView = ListView(this).apply {
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
+                0,
+                1f // weight=1：占满可用空间，按钮始终钉在底部
             )
         }
         listAdapter = ArrayAdapter(this, android.R.layout.simple_list_item_1, names)
         listView.adapter = listAdapter
 
-        val btnRefresh = Button(this).apply { text = "🔄 刷新设备列表" }
         val panel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(30, 8, 30, 4)
+            // 固定整个面板高度，避免 dialog 被列表撑满
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                px(460)
+            )
             addView(listView)
             addView(btnRefresh)
         }
@@ -914,6 +922,10 @@ class MainActivity : AppCompatActivity() {
         val s = totalSec % 60
         return "$m:$s"
     }
+
+    /** dp -> px（构建自定义对话框面板尺寸用） */
+    private fun px(dp: Int): Int =
+        (dp * resources.displayMetrics.density).toInt()
 
     // ------------------------------------------------------------------
     // 第 3 课：GENA 事件订阅
