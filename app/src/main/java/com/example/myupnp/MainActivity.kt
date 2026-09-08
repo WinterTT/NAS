@@ -8,7 +8,6 @@ import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkRequest
-import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -33,10 +32,6 @@ import androidx.lifecycle.lifecycleScope
 import com.example.myupnp.device.ScpdLoader
 import com.example.myupnp.dlna.ContentDirectoryClient
 import com.example.myupnp.dlna.DlnaPlayer
-import com.example.myupnp.dlna.LastChangeParser
-import com.example.myupnp.gena.EventProperties
-import com.example.myupnp.gena.LocalEventServer
-import com.example.myupnp.gena.LocalIp
 import com.example.myupnp.model.MediaContainer
 import com.example.myupnp.model.MediaItem
 import com.example.myupnp.model.UpnpAction
@@ -80,67 +75,22 @@ class MainActivity : AppCompatActivity() {
     private lateinit var btnNowVolDown: ImageButton
     private lateinit var btnNowVolUp: ImageButton
 
-    // ===== MVVM 第 2 批：对象与线程池全部归 ViewModel，Activity 只引用 =====
+    // ===== MVVM：对象与线程池全部归 ViewModel，Activity 只引用 =====
     private val mainHandler: Handler get() = vm.mainHandler
     private val fetchExecutor get() = vm.fetchExecutor
     private val controlExecutor get() = vm.controlExecutor
     private val registry: DeviceRegistry get() = vm.registry
     private val nowSession: NowPlayingSession get() = vm.nowSession
     private val subManager: SubscriptionManager get() = vm.subManager
-
-    private val discovery = SsdpDiscovery(object : SsdpDiscovery.Listener {
-        override fun onSsdpMessage(message: com.example.myupnp.ssdp.SsdpMessage) {
-            mainHandler.post { handleSsdpMessage(message) }
-        }
-
-        override fun onEngineError(error: Throwable) {
-            Log.w(TAG, "[SSDP!] 引擎错误: ${error.message}")
-            mainHandler.post { appendLog("!! 引擎错误: ${error.message}") }
-        }
-
-        override fun onSsdpInfo(info: String) {
-            Log.d(TAG, "[SSDP] $info")
-            mainHandler.post { appendLog("  · $info") }
-        }
-    })
-
-    private var multicastLock: WifiManager.MulticastLock? = null
+    private val discovery: SsdpDiscovery get() = vm.discovery
 
     private val deviceItems = ArrayList<DeviceListItem>()
     private lateinit var adapter: DeviceListAdapter
 
-    /**
-     * 心跳清理定时器：定期把"很久没消息"的设备移除。
-     * 原理：引擎每 SEARCH_INTERVAL_MS 主动 M-SEARCH 一次，在线设备必有应答，
-     * 所以 DEVICE_STALE_MS 内无任何消息 = 大概率已离线（没来得及发 byebye）。
-     */
-    private val heartbeatRunnable = object : Runnable {
-        override fun run() {
-            pruneStaleDevices()
-            mainHandler.postDelayed(this, HEARTBEAT_INTERVAL_MS)
-        }
-    }
-
     // ------------------------------------------------------------------
-    // A2：网络变化感知（只关心 Wi-Fi）
-    //   - 只注册 TRANSPORT_WIFI 的 NetworkRequest：蜂窝/5G 的变化不会进来
-    //   - onAvailable        Wi-Fi 连上（可能还没 IP）-> 记状态
-    //   - onCapabilitiesChanged 拿到 linkProperties 的 IPv4 -> 这时 IP 才就绪
-    //   - onLost             Wi-Fi 断开 -> 释放资源等重连
-    // 注意：回调跑在系统线程，一律 post 到主线程再动 UI/entries
+    // A2：Wi-Fi 变化 —— 系统回调在此注册/注销（生命周期绑定），
+    // 决策逻辑在 ViewModel（vm.onWifi*）。只关心 TRANSPORT_WIFI。
     // ------------------------------------------------------------------
-
-    /** 用户是否"想要扫描"（点过开始；手动点停止才置 false） */
-    private var userWantsScan = false
-
-    /** Wi-Fi 是否处于已连接状态 */
-    private var wifiConnected = false
-
-    /** 启动扫描时记录的 IP；同网段换 IP 时用它判断要不要重启 */
-    private var lastKnownWifiIp: String? = null
-
-    /** 防止网络事件风暴导致重复重启 */
-    private var startupPending = false
 
     /** 只关心 Wi-Fi 网络的请求过滤器 */
     private val wifiNetworkRequest = NetworkRequest.Builder()
@@ -149,71 +99,23 @@ class MainActivity : AppCompatActivity() {
 
     private val networkCallback = object : ConnectivityManager.NetworkCallback() {
         override fun onAvailable(network: Network) {
-            mainHandler.post { onWifiAvailable() }
+            mainHandler.post { vm.onWifiAvailable() }
         }
 
         override fun onLost(network: Network) {
-            mainHandler.post { onWifiLost() }
+            mainHandler.post { vm.onWifiLost() }
         }
 
         override fun onCapabilitiesChanged(network: Network, caps: NetworkCapabilities) {
             // Wi-Fi 的 IP/DNS 等能力就绪或变化时触发，是拿"新 IP"的信号
             mainHandler.post {
                 val ip = wifiIpv4Of(network)
-                if (ip != null) onWifiIpReady(ip)
+                if (ip != null) vm.onWifiIpReady(ip)
             }
         }
     }
 
-    /** Wi-Fi 刚连上（此时 DHCP 可能还没发 IP，先只记状态） */
-    private fun onWifiAvailable() {
-        Log.i(TAG, "[NET] Wi-Fi 连接")
-        wifiConnected = true
-    }
-
-    /** Wi-Fi 断开：若用户在扫描，释放资源并等待重连 */
-    private fun onWifiLost() {
-        Log.w(TAG, "[NET] Wi-Fi 断开")
-        wifiConnected = false
-        if (!userWantsScan) return
-        if (!discovery.isRunning()) return
-        releaseScanResources("Wi-Fi 断开")
-        vm.setStatusOverride("Wi-Fi 断开，等待重连后自动续扫…")
-    }
-
-    /** Wi-Fi 拿到 IP（连接就绪 / 或同网段换 IP） */
-    private fun onWifiIpReady(ip: String) {
-        if (!userWantsScan) return
-        if (!discovery.isRunning()) {
-            // 场景 A：想扫但引擎没跑（刚重连）-> 等 IP 到手后启动
-            if (wifiConnected && !startupPending) {
-                startupPending = true
-                Log.i(TAG, "[NET] Wi-Fi 就绪(IP=$ip)，延迟后启动扫描")
-                mainHandler.postDelayed({
-                    startupPending = false
-                    if (userWantsScan && wifiConnected && !discovery.isRunning()) {
-                        Log.i(TAG, "[NET] 自动重启扫描")
-                        startScanningInternal()
-                    }
-                }, NET_RESTART_DELAY_MS)
-            }
-        } else {
-            // 场景 B：引擎在跑但 IP 变了（同网段换 IP / DHCP 续租）
-            if (ip != lastKnownWifiIp) {
-                Log.w(TAG, "[NET] IP 变化 $lastKnownWifiIp -> $ip，重建订阅与扫描")
-                releaseScanResources("IP 变化")
-                if (!startupPending) {
-                    startupPending = true
-                    mainHandler.postDelayed({
-                        startupPending = false
-                        if (userWantsScan && wifiConnected) startScanningInternal()
-                    }, NET_RESTART_DELAY_MS)
-                }
-            }
-        }
-    }
-
-    /** 从 Network 的 linkProperties 里取非回环 IPv4（这就是该 Wi-Fi 的真实 IP） */
+    /** 从 Network 的 linkProperties 里取非回环 IPv4（该 Wi-Fi 的真实 IP） */
     private fun wifiIpv4Of(network: Network): String? {
         val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
         return cm.getLinkProperties(network)?.linkAddresses
@@ -222,40 +124,11 @@ class MainActivity : AppCompatActivity() {
             ?.hostAddress
     }
 
-    /**
-     * 释放扫描相关的一切资源（引擎/组播锁/订阅/回调服务器/设备列表/心跳）。
-     * 不改变 userWantsScan，也不改按钮状态 —— 供网络断开这类"暂时停"使用。
-     */
-    private fun releaseScanResources(reason: String) {
-        Log.i(TAG, "[SCAN] 释放资源: $reason")
-        mainHandler.removeCallbacks(heartbeatRunnable)
-        discovery.stop()
-        multicastLock?.let {
-            runCatching { it.release() }
-        }
-        multicastLock = null
-        unsubscribeAll()
-        eventServer.stop()
-        registry.clearAll()
-        clearNowPlayingIfDeviceGone() // 断网/停扫：正在播的设备没了，收起控制条
-    }
-
     // ------------------------------------------------------------------
-    // 第 3 课：GENA 事件订阅状态
-    // 订阅管理器已收进 ViewModel（见 MainViewModel.subManager）；
-    // 这里只保留回调服务器（收 NOTIFY）与消息 Toast 的订阅
+    // 第 3 课：GENA 事件
+    // 回调服务器 + 订阅管理器都收进 ViewModel（见 MainViewModel.eventServer/
+    // subManager）。Activity 只通过 subManager / vm 状态做 UI。
     // ------------------------------------------------------------------
-
-    /** App 内嵌的回调服务器：收设备 NOTIFY 推送 */
-    private val eventServer = LocalEventServer(object : LocalEventServer.Listener {
-        override fun onEvent(remote: String, sid: String?, nts: String?, body: String) {
-            mainHandler.post { handleIncomingEvent(remote, sid, nts, body) }
-        }
-
-        override fun onInfo(info: String) {
-            mainHandler.post { appendLog("  · $info") }
-        }
-    })
 
     // ---- Android 13+ 需要运行时申请 NEARBY_WIFI_DEVICES ----
     private val nearbyPermissionLauncher =
@@ -313,8 +186,7 @@ class MainActivity : AppCompatActivity() {
         }
         btnStop.setOnClickListener { stopScanning() }
         findViewById<Button>(R.id.btnClear).setOnClickListener {
-            registry.clearAll()
-            clearNowPlayingIfDeviceGone()
+            vm.clearAllDevices()
         }
 
         // ===== 第 7 课 A：底部"正在播放"控制条 =====
@@ -395,107 +267,24 @@ class MainActivity : AppCompatActivity() {
     }
 
     // ------------------------------------------------------------------
-    // 扫描控制
+    // 扫描控制（实现都在 ViewModel；这里只处理"权限 + 转发"）
     // ------------------------------------------------------------------
     private fun startScanningInternal() {
-        userWantsScan = true
-        Log.i(TAG, "[SCAN] 开始扫描，请求 MulticastLock")
-        appendLog(">> 请求 MulticastLock（否则收不到组播帧）")
-        multicastLock = try {
-            val wifi = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
-            wifi.createMulticastLock("myupnp-scan").apply {
-                setReferenceCounted(false)
-                acquire()
-            }
-        } catch (e: Exception) {
-            Log.w(TAG, "[SCAN] MulticastLock 获取失败: ${e.message}")
-            appendLog("!! 获取 MulticastLock 失败: ${e.message}")
-            null
-        }
-
-        appendLog(">> 开始监听组播组 ${SsdpDiscovery.GROUP_ADDRESS}:${SsdpDiscovery.PORT}")
-        discovery.start()
-
-        // 第 3 课：回调服务器要在 SUBSCRIBE 前就位，否则 CALLBACK 地址无效
-        if (eventServer.port == 0) {
-            eventServer.start()
-            val cb = eventCallbackUrl()
-            Log.i(TAG, "[SCAN] 事件回调服务器端口=${eventServer.port} 本机回调=$cb")
-            appendLog(">> 本机回调地址: ${cb ?: "（无法确定 IP）"}")
-        }
-
-        vm.setStatusOverride(null) // 清掉"Wi-Fi 断开"这类临时文案
-        vm.setScanning(true, R.string.status_scanning)
-        // 心跳清理只在扫描期间跑
-        mainHandler.removeCallbacks(heartbeatRunnable)
-        mainHandler.postDelayed(heartbeatRunnable, HEARTBEAT_INTERVAL_MS)
-        // 记录当前 Wi-Fi IP，供"同网段换 IP"检测
-        lastKnownWifiIp = LocalIp.ipv4()
+        vm.startScan()
     }
 
     private fun stopScanning() {
-        userWantsScan = false // 手动停止：以后网络恢复也不自动续扫
-        Log.i(TAG, "[SCAN] 停止扫描")
-        mainHandler.removeCallbacks(heartbeatRunnable)
-        discovery.stop()
-        multicastLock?.let {
-            runCatching { it.release() }
-        }
-        multicastLock = null
-        unsubscribeAll()       // 第 3 课：退出前先跟设备说再见
-        eventServer.stop()     // 关掉回调服务器
-        vm.setScanning(false, R.string.status_idle)
-        appendLog(">> 已停止扫描")
+        vm.stopScan()
     }
 
     override fun onDestroy() {
-        userWantsScan = false
-        startupPending = false
         runCatching {
             val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
             cm.unregisterNetworkCallback(networkCallback)
         }
-        mainHandler.removeCallbacks(heartbeatRunnable)
-        discovery.stop()
-        multicastLock?.let {
-            runCatching { it.release() }
-        }
-        multicastLock = null
-        unsubscribeAll()
-        eventServer.stop()
+        vm.onHostDestroyed()
         // executor 由 MainViewModel.onCleared 统一释放
         super.onDestroy()
-    }
-
-    // ------------------------------------------------------------------
-    // SSDP 消息 → 委托给 DeviceRegistry（重构后：Activity 不再管理设备存储）
-    // ------------------------------------------------------------------
-    private fun handleSsdpMessage(message: com.example.myupnp.ssdp.SsdpMessage) {
-        // logcat：不经 UI 节流，设备多时也逐条留痕，方便 adb logcat -s MyUPNP 排查
-        Log.d(
-            TAG,
-            "[SSDP:${message.type}] from=${message.sourceHost} " +
-                "usn=${message.usn ?: "-"} loc=${message.location ?: "-"} " +
-                "nt=${message.nt ?: "-"}"
-        )
-        // 登记/刷新/移除全交给注册表；变化经 ViewModel.rebuildDeviceRows 驱动列表
-        registry.onSsdpMessage(message)
-    }
-
-    /**
-     * 心跳清理：驱动 DeviceRegistry 移除超时设备，
-     * 并顺带清理这些设备残留的 GENA 订阅。
-     */
-    private fun pruneStaleDevices() {
-        val removed = registry.pruneStale(DEVICE_STALE_MS)
-        if (removed.isEmpty()) return
-        // 被移除设备的服务订阅，就地退掉（避免脏订阅 + 续订定时器空转）
-        for (entry in removed) {
-            entry.device?.services?.forEach { svc ->
-                subManager.unsubscribeByUrl(svc.eventSubUrl)
-            }
-        }
-        clearNowPlayingIfDeviceGone()
     }
 
     // ------------------------------------------------------------------
@@ -738,15 +527,6 @@ class MainActivity : AppCompatActivity() {
             return
         }
         stepVolume(rc, delta)
-    }
-
-    /** GENA 事件里的播放状态纠正控制条（播放中/暂停） */
-    private fun applyEventToNowPlaying(
-        avtUrl: String,
-        transportState: String?,
-        volume: String?
-    ) {
-        nowSession.applyEvent(avtUrl, transportState)
     }
 
     /**
@@ -1052,55 +832,8 @@ class MainActivity : AppCompatActivity() {
     /** 退订 */
     private fun unsubscribeService(service: UpnpService) = subManager.unsubscribe(service)
 
-    /** 全部退订（停止/销毁） */
-    private fun unsubscribeAll() = subManager.unsubscribeAll()
-
-    /** 构造本机回调地址 http://<本机IP>:<端口>/upnp/event/cb；服务器没起来返回 null */
-    private fun eventCallbackUrl(): String? {
-        val ip = LocalIp.ipv4() ?: return null
-        if (eventServer.port == 0) return null
-        return "http://$ip:${eventServer.port}/upnp/event/cb"
-    }
-
-    /** 收到设备推送（LocalEventServer 回调，已在主线程） */
-    private fun handleIncomingEvent(remote: String, sid: String?, nts: String?, body: String) {
-        Log.d(TAG, "[EVENT] from=$remote sid=$sid nts=$nts body=${body.take(400)}")
-        appendLog("◀ 事件推送 from $remote NTS=${nts ?: "?"} SID=${sid ?: "?"}")
-        val props = EventProperties.parse(body)
-        if (props.isEmpty()) {
-            appendLog("   (空属性)")
-        }
-        // 通过 SID 反查是哪个服务的订阅（用于把播放状态喂给控制条）
-        val eventServiceUrl = subManager.eventUrlBySid(sid)
-        for ((name, value) in props) {
-            // 第 4 课：LastChange 是转义嵌套 XML，展开成可读状态（TransportState 等）
-            if (name == "LastChange") {
-                appendLog("   LastChange 展开:")
-                val lc = LastChangeParser.parse(value)
-                if (lc.transportState != null) appendLog("     播放状态 TransportState = ${lc.transportState}")
-                if (lc.currentTrackDuration != null) appendLog("     总时长 = ${lc.currentTrackDuration}")
-                if (lc.relativeTimePosition != null) appendLog("     已播位置 = ${lc.relativeTimePosition}")
-                if (lc.volume != null) appendLog("     音量 = ${lc.volume}")
-                if (lc.mute != null) appendLog("     静音 = ${lc.mute}")
-                if (lc.values.isNotEmpty()) {
-                    val extra = lc.values.entries
-                        .filter { it.key !in listOf("TransportState", "CurrentTrackDuration", "RelativeTimePosition", "Volume", "Mute") }
-                        .joinToString(", ") { "${it.key}=${it.value}" }
-                    if (extra.isNotBlank()) appendLog("     其他: $extra")
-                }
-                // 第 7 课 A：让底部控制条跟随真实播放状态（播放/暂停图标）
-                if (eventServiceUrl != null) {
-                    applyEventToNowPlaying(
-                        avtUrl = eventServiceUrl,
-                        transportState = lc.transportState,
-                        volume = lc.volume
-                    )
-                }
-            } else {
-                appendLog("   $name = $value")
-            }
-        }
-    }
+    /** 构造本机回调地址（事件服务器在 VM 内管理） */
+    private fun eventCallbackUrl(): String? = vm.eventCallbackUrl
 
     // ------------------------------------------------------------------
     // 历史说明：这里曾是"缓冲 + 定时批量刷新到 TextView"的 UI 日志。
@@ -1114,15 +847,6 @@ class MainActivity : AppCompatActivity() {
     }
 
     companion object {
-        /** 心跳检查周期：多久跑一次清理 */
-        private const val HEARTBEAT_INTERVAL_MS = 10_000L
-
-        /** 设备判定离线阈值：比引擎 M-SEARCH 周期(15s)宽裕，错过两轮即算失联 */
-        private const val DEVICE_STALE_MS = 45_000L
-
-        /** 网络恢复后延迟多久再重启扫描（等 DHCP/IP 就绪） */
-        private const val NET_RESTART_DELAY_MS = 1_500L
-
         /** 填参数时预填的常见默认值（DLNA 媒体设备几乎都长这样） */
         private val DEFAULT_ARGS = mapOf(
             "InstanceID" to "0",   // AVTransport/RenderingControl 的实例号
