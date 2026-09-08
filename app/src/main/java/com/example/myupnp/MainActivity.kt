@@ -86,6 +86,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var btnNowNext: ImageButton
     private lateinit var tvNowQueue: TextView
     private lateinit var tvQueueEntry: TextView
+    private lateinit var tvEmpty: TextView
 
     // ===== 第 7 课 C：封面缩略图 + 歌手/专辑小字 =====
     private lateinit var imgNowArt: android.widget.ImageView
@@ -173,6 +174,7 @@ class MainActivity : AppCompatActivity() {
         tvStatus = findViewById(R.id.tvStatus)
         tvDeviceTitle = findViewById(R.id.tvDeviceTitle)
         tvQueueEntry = findViewById(R.id.tvQueueEntry)
+        tvEmpty = findViewById(R.id.tvEmpty)
         listDevices = findViewById(R.id.listDevices)
         btnStart = findViewById(R.id.btnStart)
         btnStop = findViewById(R.id.btnStop)
@@ -273,9 +275,9 @@ class MainActivity : AppCompatActivity() {
         // 通用 UI 状态：扫描按钮/状态栏/计数/正在播放控制条
         lifecycleScope.launch {
             vm.uiState.collect { s ->
-                // 扫描按钮可用性 & 状态栏
-                btnStart.isEnabled = !s.scanning
-                btnStop.isEnabled = s.scanning
+                // 扫描开关（开始/停止互斥显示）
+                btnStart.visibility = if (s.scanning) View.GONE else View.VISIBLE
+                btnStop.visibility = if (s.scanning) View.VISIBLE else View.GONE
                 if (s.statusOverride != null) {
                     tvStatus.text = s.statusOverride
                 } else if (s.statusText != null) {
@@ -285,6 +287,14 @@ class MainActivity : AppCompatActivity() {
                 tvDeviceTitle.text =
                     getString(R.string.device_title) + "  (${s.deviceCount})" +
                         if (s.deviceCount > 0) "　长按=收藏/重命名" else ""
+                // 空态：没设备时显示引导
+                if (s.deviceCount == 0) {
+                    tvEmpty.visibility = View.VISIBLE
+                    tvEmpty.text = if (s.scanning) "正在扫描附近的设备…\n请稍候"
+                    else "还没有发现设备\n点右上角「开始扫描」\n（音箱/电视/媒体服务器需在同一 Wi-Fi）"
+                } else {
+                    tvEmpty.visibility = View.GONE
+                }
                 // 首页队列入口：队列有内容才显示（没在播放也能点开）
                 if (s.queueHasItems) {
                     tvQueueEntry.visibility = View.VISIBLE
@@ -404,7 +414,8 @@ class MainActivity : AppCompatActivity() {
                     arrayOf(
                         "▶ 播放器场景（推送 URL 播放）",
                         "服务控制 / 订阅（SOAP + GENA）",
-                        "⚙ 设备管理（收藏 / 重命名）"
+                        "⚙ 设备管理（收藏 / 重命名）",
+                        "ℹ 设备信息（IP/服务，调试）"
                     )
                 ) { _, which ->
                     when (which) {
@@ -417,6 +428,7 @@ class MainActivity : AppCompatActivity() {
                         )
                         1 -> showServicePicker(entry, device)
                         2 -> showDeviceManageDialog(entry, device)
+                        3 -> showDeviceInfoDialog(entry)
                     }
                 }
                 .setNegativeButton("取消", null)
@@ -436,6 +448,8 @@ class MainActivity : AppCompatActivity() {
                 }
                 menus += "⚙ 设备管理（收藏 / 重命名）"
                 actions += { showDeviceManageDialog(entry, device) }
+                menus += "ℹ 设备信息（IP/服务，调试）"
+                actions += { showDeviceInfoDialog(entry) }
                 AlertDialog.Builder(this)
                     .setTitle(vm.shownNameOf(entry))
                     .setItems(menus.toTypedArray()) { _, which ->
@@ -483,6 +497,15 @@ class MainActivity : AppCompatActivity() {
             .setView(input)
             .setPositiveButton("保存") { _, _ -> vm.renameDevice(entry.location, input.text.toString()) }
             .setNegativeButton("取消", null)
+            .show()
+    }
+
+    /** 设备详细信息（IP/UDN/服务/URL 等调试信息） */
+    private fun showDeviceInfoDialog(entry: Entry) {
+        AlertDialog.Builder(this)
+            .setTitle(vm.shownNameOf(entry))
+            .setMessage(vm.deviceInfoText(entry))
+            .setPositiveButton("好", null)
             .show()
     }
 

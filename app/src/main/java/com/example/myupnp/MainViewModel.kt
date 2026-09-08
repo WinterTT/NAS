@@ -485,10 +485,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             if (group.isEmpty()) return
             rows += DeviceListItem.Header(title)
             for (entry in group) {
-                rows += DeviceListItem.DeviceItem(entry.location, formatDeviceText(entry))
+                rows += deviceItemOf(entry)
             }
         }
-        appendGroup("📦 MediaServer（${mediaServer.size}）", mediaServer)
+        appendGroup("媒体服务器（${mediaServer.size}）", mediaServer)
         appendGroup("其他设备（${others.size}）", others)
         _deviceRows.value = rows
         _uiState.update { it.copy(deviceCount = registry.size) }
@@ -496,30 +496,57 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         restoreLastSessionIfDeviceBack()
     }
 
-    private fun formatDeviceText(entry: Entry): String {
+    /** 组装一行设备卡片（名称 + 类型·型号·IP 小字） */
+    private fun deviceItemOf(entry: Entry): DeviceListItem.DeviceItem {
         val device = entry.device
-        return if (device != null) {
-            val star = if (isFavoriteEntry(entry)) "⭐ " else ""
-            val alias = bookmarks.alias(deviceIdOf(entry))
-            val main = alias ?: device.friendlyName.ifEmpty { "（未命名）" }
-            buildString {
-                appendLine("$star$main")
-                appendLine(
-                    "  型号: ${device.modelName.ifEmpty { "?" }} | " +
-                        "制造商: ${device.manufacturer.ifEmpty { "?" }}"
-                )
-                if (alias != null) appendLine("  原名: ${device.friendlyName.ifEmpty { "（未命名）" }}")
-                appendLine("  类型: ${device.deviceType.substringAfterLast(':').ifEmpty { device.deviceType }}")
-                appendLine(
-                    "  服务(${device.services.size}): " +
-                        device.services.joinToString(", ") { it.serviceType.substringAfterLast(':') }
-                )
-                append("@ ${entry.location}")
-            }.trimEnd()
-        } else {
-            "（等待描述…）\n  USN: ${entry.usn ?: "?"}\n  @ ${entry.location}" +
-                if (entry.failed) "\n  描述获取失败" else ""
+        if (device == null) {
+            return DeviceListItem.DeviceItem(
+                entryKey = entry.location,
+                name = if (entry.failed) "（描述获取失败）" else "正在获取设备信息…",
+                sub = entry.ip.ifEmpty { "IP 未知" }
+            )
         }
+        val star = if (isFavoriteEntry(entry)) "⭐ " else ""
+        val alias = bookmarks.alias(deviceIdOf(entry))
+        val shown = alias ?: device.friendlyName.ifEmpty { "（未命名）" }
+        val kind = when {
+            isMediaServer(device) -> "媒体服务器"
+            DlnaPlayer.isRenderer(device) -> "播放器"
+            else -> "设备"
+        }
+        val sub = buildString {
+            append(kind)
+            val model = device.modelName.trim()
+            if (model.isNotEmpty() && !device.friendlyName.contains(model)) append(" · $model")
+            if (entry.ip.isNotEmpty()) append(" · ${entry.ip}")
+            if (alias != null && device.friendlyName.isNotBlank()) append(" · 原名${device.friendlyName}")
+        }
+        return DeviceListItem.DeviceItem(entryKey = entry.location, name = "$star$shown", sub = sub)
+    }
+
+    /** 设备详细信息（IP/UDN/服务/URL，调试用，UI 弹窗展示） */
+    fun deviceInfoText(entry: Entry): String {
+        val device = entry.device
+        val sb = StringBuilder()
+        sb.appendLine("名称：${shownNameOf(entry)}")
+        if (device != null) {
+            if (bookmarks.alias(deviceIdOf(entry)) != null) sb.appendLine("原名：${device.friendlyName}")
+            sb.appendLine("类型：${device.deviceType}")
+            sb.appendLine("UDN：${device.udn.ifEmpty { "（无）" }}")
+            sb.appendLine("厂商：${device.manufacturer.ifEmpty { "?" }}  型号：${device.modelName.ifEmpty { "?" }}")
+            sb.appendLine("服务(${device.services.size})：")
+            for (svc in device.services) {
+                sb.appendLine("  • ${svc.serviceType.substringAfterLast(':')}")
+                sb.appendLine("      控制: ${svc.controlUrl}")
+                if (svc.eventSubUrl.isNotBlank()) sb.appendLine("      事件: ${svc.eventSubUrl}")
+            }
+        } else {
+            sb.appendLine("（设备描述尚未加载成功）")
+            sb.appendLine("USN：${entry.usn ?: "?"}")
+        }
+        sb.appendLine("地址：${entry.location}")
+        sb.append("收藏：${if (isFavoriteEntry(entry)) "是" else "否"}")
+        return sb.toString()
     }
 
     private fun isMediaServer(device: com.example.myupnp.model.UpnpDevice): Boolean {

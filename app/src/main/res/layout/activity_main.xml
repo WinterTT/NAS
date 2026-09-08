@@ -4,90 +4,169 @@
     android:id="@+id/main"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
+    android:background="@color/window_bg"
     android:orientation="vertical"
-    android:padding="12dp"
     tools:context=".MainActivity">
 
+    <!-- ================= 顶栏：标题 + 扫描开关 ================= -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
+        android:layout_marginStart="16dp"
+        android:layout_marginTop="14dp"
+        android:layout_marginEnd="16dp"
         android:gravity="center_vertical"
         android:orientation="horizontal">
 
-        <Button
+        <TextView
+            android:id="@+id/tvAppTitle"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="@string/app_name"
+            android:textColor="@color/text_primary"
+            android:textSize="20sp"
+            android:textStyle="bold" />
+
+        <androidx.appcompat.widget.AppCompatButton
             android:id="@+id/btnStart"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="@string/btn_start" />
+            android:layout_width="wrap_content"
+            android:layout_height="40dp"
+            android:background="@drawable/bg_pill_primary"
+            android:minWidth="0dp"
+            android:paddingStart="18dp"
+            android:paddingEnd="18dp"
+            android:stateListAnimator="@null"
+            android:text="@string/btn_start"
+            android:textAllCaps="false"
+            android:textColor="@color/on_brand"
+            android:textSize="13sp" />
 
-        <Button
+        <androidx.appcompat.widget.AppCompatButton
             android:id="@+id/btnStop"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:enabled="false"
-            android:text="@string/btn_stop" />
-
-        <Button
-            android:id="@+id/btnClear"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="@string/btn_clear" />
+            android:layout_width="wrap_content"
+            android:layout_height="40dp"
+            android:layout_marginStart="8dp"
+            android:background="@drawable/bg_pill_ghost"
+            android:minWidth="0dp"
+            android:paddingStart="18dp"
+            android:paddingEnd="18dp"
+            android:stateListAnimator="@null"
+            android:text="@string/btn_stop"
+            android:textAllCaps="false"
+            android:textColor="@color/text_primary"
+            android:textSize="13sp"
+            android:visibility="gone"
+            tools:visibility="visible" />
     </LinearLayout>
 
+    <!-- 状态行（空闲/扫描中/Wi-Fi 断开等文案） -->
     <TextView
         android:id="@+id/tvStatus"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
+        android:layout_marginHorizontal="16dp"
         android:layout_marginTop="6dp"
         android:text="@string/status_idle"
-        android:textStyle="bold" />
-
-    <TextView
-        android:id="@+id/tvDeviceTitle"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="10dp"
-        android:text="@string/device_title"
-        android:textColor="?android:attr/textColorSecondary"
+        android:textColor="@color/text_secondary"
         android:textSize="13sp" />
 
-    <!-- 第 7 课 B：首页常驻的"播放队列"入口（没在播放也能看到/点进队列） -->
+    <!-- ================= 设备区标题 + 清空 ================= -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="16dp"
+        android:layout_marginTop="16dp"
+        android:layout_marginEnd="16dp"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <TextView
+            android:id="@+id/tvDeviceTitle"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:ellipsize="end"
+            android:maxLines="1"
+            android:text="@string/device_title"
+            android:textColor="@color/text_secondary"
+            android:textSize="13sp"
+            android:textStyle="bold" />
+
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/btnClear"
+            android:layout_width="wrap_content"
+            android:layout_height="32dp"
+            android:background="@drawable/bg_pill_ghost"
+            android:minWidth="0dp"
+            android:paddingStart="14dp"
+            android:paddingEnd="14dp"
+            android:stateListAnimator="@null"
+            android:text="@string/btn_clear"
+            android:textAllCaps="false"
+            android:textColor="@color/text_secondary"
+            android:textSize="12sp" />
+    </LinearLayout>
+
+    <!-- 首页常驻的"播放队列"入口（没在播放也能点进队列） -->
     <TextView
         android:id="@+id/tvQueueEntry"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="4dp"
-        android:background="@drawable/bg_now_bar"
+        android:layout_marginHorizontal="12dp"
+        android:layout_marginTop="10dp"
+        android:background="@drawable/bg_row_card"
         android:drawableStart="@drawable/ic_queue"
         android:drawablePadding="6dp"
         android:drawableTint="@color/now_bar_text"
         android:gravity="center_vertical"
-        android:paddingHorizontal="10dp"
-        android:paddingVertical="6dp"
+        android:paddingHorizontal="12dp"
+        android:paddingVertical="8dp"
         android:text="播放队列"
-        android:textColor="@color/now_bar_text"
+        android:textColor="@color/text_primary"
         android:textSize="12sp"
         android:visibility="gone"
         tools:visibility="gone" />
 
-    <ListView
-        android:id="@+id/listDevices"
+    <!-- ================= 设备列表（卡片行 + 空态文案） ================= -->
+    <FrameLayout
         android:layout_width="match_parent"
         android:layout_height="0dp"
-        android:layout_weight="1"
-        android:layout_marginTop="2dp"
-        android:divider="?android:attr/listDivider"
-        android:choiceMode="none" />
+        android:layout_marginHorizontal="12dp"
+        android:layout_marginTop="4dp"
+        android:layout_weight="1">
 
-    <!-- ===== 第 7 课 A：底部"正在播放"控制条（含进度条） ===== -->
+        <ListView
+            android:id="@+id/listDevices"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:clipToPadding="false"
+            android:divider="@null"
+            android:dividerHeight="0dp"
+            android:paddingBottom="8dp" />
+
+        <TextView
+            android:id="@+id/tvEmpty"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            android:gravity="center"
+            android:lineSpacingExtra="4dp"
+            android:textColor="@color/text_faint"
+            android:textSize="14sp"
+            android:visibility="gone"
+            tools:visibility="visible"
+            tools:text="还没有发现设备\n点右上角「开始扫描」" />
+    </FrameLayout>
+
+    <!-- ================= 底部"正在播放"控制条 ================= -->
     <LinearLayout
         android:id="@+id/nowPlayingBar"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="6dp"
+        android:layout_marginHorizontal="12dp"
+        android:layout_marginTop="4dp"
+        android:layout_marginBottom="4dp"
         android:background="@drawable/bg_now_bar"
         android:orientation="vertical"
         android:paddingHorizontal="10dp"
@@ -95,14 +174,14 @@
         android:visibility="gone"
         tools:visibility="visible">
 
-        <!-- 第一行：信息 + 控制按钮 -->
+        <!-- 第一行：封面 + 信息 + 控制按钮 -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:gravity="center_vertical"
             android:orientation="horizontal">
 
-            <!-- 第 7 课 C：专辑封面缩略图（有封面才显示） -->
+            <!-- 专辑封面缩略图（有封面才显示） -->
             <ImageView
                 android:id="@+id/imgNowArt"
                 android:layout_width="44dp"
@@ -159,7 +238,7 @@
                         android:textSize="12sp" />
                 </LinearLayout>
 
-                <!-- 第 7 课 C：歌手 · 专辑 小字（曲库元数据里有才显示） -->
+                <!-- 歌手 · 专辑 小字 -->
                 <TextView
                     android:id="@+id/tvNowMeta"
                     android:layout_width="match_parent"
@@ -178,7 +257,8 @@
                 android:layout_height="44dp"
                 android:background="?android:attr/selectableItemBackgroundBorderless"
                 android:contentDescription="播放/暂停"
-                android:src="@drawable/ic_play" />
+                android:src="@drawable/ic_play"
+                android:tint="@color/now_bar_text" />
 
             <ImageButton
                 android:id="@+id/btnNowStop"
@@ -186,7 +266,8 @@
                 android:layout_height="44dp"
                 android:background="?android:attr/selectableItemBackgroundBorderless"
                 android:contentDescription="停止"
-                android:src="@drawable/ic_stop" />
+                android:src="@drawable/ic_stop"
+                android:tint="@color/now_bar_text" />
 
             <ImageButton
                 android:id="@+id/btnNowVolDown"
@@ -194,7 +275,8 @@
                 android:layout_height="44dp"
                 android:background="?android:attr/selectableItemBackgroundBorderless"
                 android:contentDescription="音量减小"
-                android:src="@drawable/ic_vol_down" />
+                android:src="@drawable/ic_vol_down"
+                android:tint="@color/now_bar_text" />
 
             <ImageButton
                 android:id="@+id/btnNowVolUp"
@@ -202,7 +284,8 @@
                 android:layout_height="44dp"
                 android:background="?android:attr/selectableItemBackgroundBorderless"
                 android:contentDescription="音量增大"
-                android:src="@drawable/ic_vol_up" />
+                android:src="@drawable/ic_vol_up"
+                android:tint="@color/now_bar_text" />
         </LinearLayout>
 
         <!-- 第二行：播放进度条 + 时间 -->
@@ -227,7 +310,9 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:max="1000" />
+                android:max="1000"
+                android:progressTint="@color/brand"
+                android:thumbTint="@color/brand" />
 
             <TextView
                 android:id="@+id/tvNowDuration"
@@ -240,7 +325,7 @@
                 android:textSize="11sp" />
         </LinearLayout>
 
-        <!-- 第三行：第 7 课 B 播放队列（上一首 / 下一首 + 队列入口） -->
+        <!-- 第三行：播放队列（上一首 / 下一首 + 队列入口） -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -253,7 +338,8 @@
                 android:layout_height="40dp"
                 android:background="?android:attr/selectableItemBackgroundBorderless"
                 android:contentDescription="上一首"
-                android:src="@drawable/ic_prev" />
+                android:src="@drawable/ic_prev"
+                android:tint="@color/now_bar_text" />
 
             <ImageButton
                 android:id="@+id/btnNowNext"
@@ -261,16 +347,17 @@
                 android:layout_height="40dp"
                 android:background="?android:attr/selectableItemBackgroundBorderless"
                 android:contentDescription="下一首"
-                android:src="@drawable/ic_next" />
+                android:src="@drawable/ic_next"
+                android:tint="@color/now_bar_text" />
 
             <TextView
                 android:id="@+id/tvNowQueue"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginStart="6dp"
+                android:background="?android:attr/selectableItemBackground"
                 android:paddingHorizontal="10dp"
                 android:paddingVertical="4dp"
-                android:background="?android:attr/selectableItemBackground"
                 android:text="队列(0)"
                 android:textColor="@color/now_bar_text"
                 android:textSize="12sp" />
@@ -292,5 +379,4 @@
                 android:textSize="11sp" />
         </LinearLayout>
     </LinearLayout>
-
 </LinearLayout>
