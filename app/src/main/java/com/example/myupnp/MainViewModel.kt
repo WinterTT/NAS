@@ -39,6 +39,8 @@ import java.net.Inet4Address
 import java.net.URL
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import org.json.JSONArray
+import org.json.JSONObject
 
 /**
  * MainViewModel —— MVVM 迁移（第 3 批）
@@ -102,6 +104,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     /** 播放队列（第 7 课 B）：排队 + 播完自动连播 */
     val playbackQueue = PlaybackQueue()
+
+    /** 队列持久化（第 7 课 A：重启恢复"待播列表"） */
+    private val queuePrefs =
+        getApplication<Application>().getSharedPreferences("play_queue", Context.MODE_PRIVATE)
+    private var queueRestored = false
 
     val subManager = SubscriptionManager(
         mainHandler = mainHandler,
@@ -596,7 +603,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /** 队列记账变化后刷新 UI 里的队列角标（只动队列字段） */
+    /** 队列记账变化后刷新 UI 里的队列角标（只动队列字段），并顺带持久化 */
     private fun syncQueueUi() {
         _uiState.update {
             it.copy(
@@ -605,6 +612,84 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 queueHasItems = playbackQueue.hasActivity,
             )
         }
+        persistQueue()
+    }
+
+    // ------------------------------------------------------------------
+    // 第 7 课 A：队列管理（删除/移动/插队）与持久化
+    // ------------------------------------------------------------------
+
+    /** 启动时调用一次：恢复上次没播完的"待播列表" */
+    fun prepareRestoredQueue() {
+        if (queueRestored) return
+        queueRestored = true
+        val items = runCatching { readPendingFromPrefs() }.getOrDefault(emptyList())
+        if (items.isNotEmpty()) {
+            playbackQueue.restorePending(items)
+            Log.i(TAG, "[QUEUE] 已恢复 ${items.size} 首待播")
+        }
+        syncQueueUi()
+    }
+
+    /** "下一首播放"：插到队首（同曲先移除），当前这首播完自动播它 */
+    fun queuePlayNext(item: MediaItem) {
+        playbackQueue.playNext(item)
+        syncQueueUi()
+        postMessage("已插到队首：当前这首播完就播《${item.title}》")
+    }
+
+    /** 删除待播中的某一首 */
+    fun queueRemovePendingAt(index: Int) {
+        if (index !in 0 until playbackQueue.pendingCount) return
+        val name = playbackQueue.pendingAt(index)?.title ?: return
+        playbackQueue.removePendingAt(index)
+        syncQueueUi()
+        postMessage("已从队列删除《$name》")
+    }
+
+    /** 上移(-1)/下移(+1)待播中的某一首 */
+    fun queueMovePendingAt(index: Int, delta: Int) {
+        if (index !in 0 until playbackQueue.pendingCount) return
+        playbackQueue.movePending(index, delta)
+        syncQueueUi()
+    }
+
+    /** 把"待播列表"写进 SharedPreferences（JSON） */
+    private fun persistQueue() {
+        val arr = JSONArray()
+        for (item in playbackQueue.snapshotPending()) {
+            arr.put(
+                JSONObject().apply {
+                    put("i", item.id)
+                    put("t", item.title)
+                    put("r", item.resUrl)
+                    put("a", item.artist)
+                    put("l", item.album)
+                    put("c", item.artUrl)
+                }
+            )
+        }
+        queuePrefs.edit().putString(KEY_QUEUE, arr.toString()).apply()
+    }
+
+    private fun readPendingFromPrefs(): List<MediaItem> {
+        val raw = queuePrefs.getString(KEY_QUEUE, "[]") ?: "[]"
+        val arr = JSONArray(raw)
+        val out = ArrayList<MediaItem>()
+        for (i in 0 until arr.length()) {
+            val o = arr.optJSONObject(i) ?: continue
+            val res = o.optString("r")
+            if (res.isBlank()) continue
+            out += MediaItem(
+                id = o.optString("i"),
+                title = o.optString("t").ifEmpty { "（未命名）" },
+                resUrl = res,
+                artist = o.optString("a"),
+                album = o.optString("l"),
+                artUrl = o.optString("c")
+            )
+        }
+        return out
     }
 
     // ------------------------------------------------------------------
@@ -957,5 +1042,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         private const val KEY_DEVICE_KEY = "device_key"
         private const val KEY_DEVICE_NAME = "device_name"
         private const val KEY_TITLE = "title"
+
+        // 队列持久化
+        private const val KEY_QUEUE = "pending"
     }
 }

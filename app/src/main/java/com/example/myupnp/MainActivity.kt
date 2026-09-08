@@ -332,6 +332,7 @@ class MainActivity : AppCompatActivity() {
         }
         refreshLibraryRows() // 提前准备好媒体服务器列表
         showPage(pageLibrary)
+        vm.prepareRestoredQueue() // 恢复上次没播完的"待播列表"
 
         // ===== MVVM：UI 观察 ViewModel 状态（第 1+2 批） =====
         // 通用 UI 状态：扫描按钮/状态栏/正在播放控制条
@@ -701,12 +702,14 @@ class MainActivity : AppCompatActivity() {
             .setItems(
                 arrayOf(
                     "立即播放",
-                    "加入队列（播完自动连播）"
+                    "下一首播放（插队，播完当前就播它）",
+                    "加入队列（排到队尾）"
                 )
             ) { _, which ->
                 when (which) {
                     0 -> playMediaItemFromServer(item)
-                    1 -> vm.queueEnqueue(item)
+                    1 -> vm.queuePlayNext(item)
+                    2 -> vm.queueEnqueue(item)
                 }
             }
             .setNegativeButton("取消", null)
@@ -844,49 +847,117 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
-    /** 队列总览：正在播 + 接下来 N 首；点待播一首 = 立即切到它 */
+    /** 队列总览与管理：单击待播=立即切；长按待播=删除/上移/下移 */
     private fun showQueueDialog() {
-        val queue = vm.playbackQueue
-        val pending = vm.queuePendingSnapshot()
-        val rows = ArrayList<String>()
-        val actions = ArrayList<(() -> Unit)?>()
+        var queueDialog: AlertDialog? = null
+        val rows = ArrayList<MediaItem>()
+        val queueAdapter = object : android.widget.BaseAdapter() {
+            override fun getCount(): Int = rows.size
+            override fun getItem(p: Int): Any = rows[p]
+            override fun getItemId(p: Int): Long = p.toLong()
+            override fun getView(p: Int, convert: View?, parent: ViewGroup): View {
+                val view = convert
+                    ?: layoutInflater.inflate(R.layout.item_queue_row, parent, false)
+                val item = rows[p]
+                view.findViewById<TextView>(R.id.tvQIndex).text = (p + 1).toString()
+                view.findViewById<TextView>(R.id.tvQTitle).text = item.title
+                val sub = listOf(item.artist, item.album)
+                    .filter { it.isNotBlank() }
+                    .joinToString(" · ")
+                view.findViewById<TextView>(R.id.tvQSub).text =
+                    sub.ifEmpty { item.resUrl }
+                return view
+            }
+        }
 
-        val cur = queue.current
-        when {
-            cur == null -> Unit
-            nowSession.isActive -> {
-                rows += "▶ 正在播放：《${cur.title}》"
-                actions += null
-            }
-            else -> {
-                rows += "▶ 当前：《${cur.title}》（还没开播/播放目标已不在）"
-                actions += null
+        val tvCurrent = TextView(this).apply {
+            setPadding(4, 0, 4, 6)
+            textSize = 12f
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_secondary))
+        }
+        val tvHint = TextView(this).apply {
+            setPadding(4, 6, 4, 0)
+            textSize = 11f
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_faint))
+            text = "点待播一首 = 立即切到它；长按 = 管理（删除 / 上移 / 下移）"
+        }
+        val listView = ListView(this).apply {
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f
+            )
+            divider = null
+            dividerHeight = 0
+            adapter = queueAdapter
+        }
+        val panel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(24, 8, 24, 4)
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, px(480)
+            )
+            addView(tvCurrent)
+            addView(listView)
+            addView(tvHint)
+        }
+
+        fun refresh() {
+            rows.clear()
+            rows.addAll(vm.queuePendingSnapshot())
+            queueAdapter.notifyDataSetChanged()
+            val cur = vm.playbackQueue.current
+            tvCurrent.text = when {
+                cur == null -> "（当前没有在播曲目）"
+                nowSession.isActive -> "▶ 正在播：《${cur.title}》"
+                else -> "▶ 当前：《${cur.title}》（还没开播/目标已不在）"
             }
         }
-        if (pending.isEmpty()) {
-            rows += if (queue.hasActivity) "—— 没有待播的了 ——"
-            else "队列是空的：去曲库点歌选「加入队列」"
-            actions += null
-        } else {
-            if (!nowSession.isActive) {
-                rows += "（尚未开播：点下面的歌会先让你选播放设备）"
-                actions += null
-            }
-            for ((i, item) in pending.withIndex()) {
-                rows += "${i + 1}. ${item.title}"
-                actions += { playQueueRow(item, i) }
-            }
+        refresh()
+
+        listView.setOnItemClickListener { _, _, p, _ ->
+            val target = rows.getOrNull(p) ?: return@setOnItemClickListener
+            queueDialog?.dismiss()
+            playQueueRow(target, p)
         }
-        if (queue.historyCount > 0) {
-            rows += "…已播 ${queue.historyCount} 首（控制条「上一首」可回放）"
-            actions += null
+        listView.setOnItemLongClickListener { _, _, p, _ ->
+            val target = rows.getOrNull(p) ?: return@setOnItemLongClickListener false
+            AlertDialog.Builder(this)
+                .setTitle(target.title)
+                .setItems(
+                    arrayOf("立即播放", "上移", "下移", "删除")
+                ) { _, which ->
+                    when (which) {
+                        0 -> {
+                            queueDialog?.dismiss()
+                            playQueueRow(target, p)
+                        }
+                        1 -> {
+                            vm.queueMovePendingAt(p, -1)
+                            refresh()
+                        }
+                        2 -> {
+                            vm.queueMovePendingAt(p, 1)
+                            refresh()
+                        }
+                        3 -> {
+                            vm.queueRemovePendingAt(p)
+                            refresh()
+                        }
+                    }
+                }
+                .setNegativeButton("取消", null)
+                .show()
+            true
         }
-        AlertDialog.Builder(this)
+
+        queueDialog = AlertDialog.Builder(this)
             .setTitle("播放队列")
-            .setItems(rows.toTypedArray()) { _, which ->
-                actions.getOrNull(which)?.invoke()
+            .setView(panel)
+            .setNeutralButton("清空队列") { _, _ ->
+                vm.queueClear()
+                rows.clear()
+                queueAdapter.notifyDataSetChanged()
+                tvCurrent.text = "（当前没有在播曲目）"
             }
-            .setNeutralButton("清空队列") { _, _ -> vm.queueClear() }
             .setNegativeButton("关闭", null)
             .show()
     }

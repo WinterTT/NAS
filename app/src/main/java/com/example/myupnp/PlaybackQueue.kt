@@ -86,6 +86,36 @@ class PlaybackQueue {
         current = null
     }
 
+    // ------------------------------------------------------------------
+    // 队列管理增强（第 7 课 A）
+    // ------------------------------------------------------------------
+
+    /** 插队到队首（"下一首播放"）：同曲先移除再放到最前 */
+    fun playNext(item: MediaItem) {
+        pending.removeAll { same(it, item) }
+        pending.add(0, item)
+    }
+
+    /** 删除待播中的第 index 首（不影响当前在播的） */
+    fun removePendingAt(index: Int) {
+        if (index in pending.indices) pending.removeAt(index)
+    }
+
+    /** 把待播中的第 index 首上移(delta=-1)/下移(delta=1) */
+    fun movePending(index: Int, delta: Int) {
+        if (index !in pending.indices) return
+        val target = index + delta
+        if (target !in pending.indices) return
+        val item = pending.removeAt(index)
+        pending.add(target, item)
+    }
+
+    /** 重启后恢复"待播列表"（当前曲/历史属于本次会话，不恢复） */
+    fun restorePending(items: List<MediaItem>) {
+        pending.clear()
+        pending.addAll(items)
+    }
+
     fun snapshotPending(): List<MediaItem> = pending.toList()
 
     /** 同一首歌：用 id + 播放地址判断（不同次 Browse 拿到的对象也认） */
