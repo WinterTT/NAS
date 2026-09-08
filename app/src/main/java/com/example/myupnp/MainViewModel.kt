@@ -12,11 +12,13 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.myupnp.core.EverythingFreeGate
 import com.example.myupnp.core.FeatureGate
+import com.example.myupnp.dlna.DlnaPlayer
 import com.example.myupnp.dlna.LastChangeParser
 import com.example.myupnp.gena.EventProperties
 import com.example.myupnp.gena.GenaClient
 import com.example.myupnp.gena.LocalEventServer
 import com.example.myupnp.gena.LocalIp
+import com.example.myupnp.model.UpnpDevice
 import com.example.myupnp.model.UpnpService
 import com.example.myupnp.ssdp.SsdpDiscovery
 import com.example.myupnp.ssdp.SsdpMessage
@@ -460,6 +462,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         appendGroup("其他设备（${others.size}）", others)
         _deviceRows.value = rows
         _uiState.update { it.copy(deviceCount = registry.size) }
+        // 设备列表每次变化后，试着恢复"上次播放"的控制条（设备刚回来时）
+        restoreLastSessionIfDeviceBack()
     }
 
     private fun formatDeviceText(entry: Entry): String {
@@ -501,7 +505,72 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 seekable = np?.seekable == true,
             )
         }
+        // 有会话就记忆"上次在播什么"（重启后恢复用）
+        if (np != null) {
+            saveLastSession(
+                deviceKey = np.deviceKey,
+                deviceName = np.deviceName,
+                title = np.title
+            )
+        } else {
+            clearLastSession()
+        }
     }
+
+    // ------------------------------------------------------------------
+    // "记忆上次播放"：持久化上次会话，重启/重扫后自动恢复控制条
+    // ------------------------------------------------------------------
+
+    private val prefs =
+        getApplication<Application>().getSharedPreferences("playback_memory", Context.MODE_PRIVATE)
+
+    private data class LastSession(val deviceKey: String?, val deviceName: String, val title: String)
+
+    private fun saveLastSession(deviceKey: String?, deviceName: String, title: String) {
+        prefs.edit()
+            .putString(KEY_DEVICE_KEY, deviceKey)
+            .putString(KEY_DEVICE_NAME, deviceName)
+            .putString(KEY_TITLE, title)
+            .apply()
+    }
+
+    private fun loadLastSession(): LastSession? {
+        val key = prefs.getString(KEY_DEVICE_KEY, null) ?: return null
+        val name = prefs.getString(KEY_DEVICE_NAME, null) ?: return null
+        val title = prefs.getString(KEY_TITLE, null) ?: return null
+        return LastSession(key, name, title)
+    }
+
+    private fun clearLastSession() {
+        prefs.edit().clear().apply()
+    }
+
+    /**
+     * 尝试恢复上次播放会话：目标设备已被重新发现时，重建控制条并查真实状态。
+     * 不自动播放 —— 只恢复"上次在播什么"的显示，实际状态用 GetTransportInfo 确认。
+     */
+    fun restoreLastSessionIfDeviceBack() {
+        if (nowSession.isActive) return           // 已有会话
+        val last = loadLastSession() ?: return
+        // 用 deviceKey（=LOCATION）精确定位；找不到再按 friendlyName 试
+        val entry = last.deviceKey?.let { registry[it] }
+            ?: registry.all().firstOrNull { it.device?.friendlyName == last.deviceName }
+            ?: return
+        val device = entry.device ?: return       // 描述还没下来
+        val avt = DlnaPlayer.avTransportOf(device) ?: return
+        val rc = DlnaPlayer.renderingControlOf(device)
+        Log.i(TAG, "[MEM] 设备回来了，恢复上次播放显示: ${last.title} @ ${last.deviceName}")
+        nowSession.begin(
+            deviceName = last.deviceName,
+            avt = avt,
+            rc = rc,
+            title = last.title,
+            deviceKey = entry.location,
+            playing = false  // 先不假定在播，靠 GetTransportInfo 确认
+        )
+        nowSession.refreshTransportState() // 问设备真实状态，点亮播放/暂停图标
+    }
+
 
     private fun clearNowPlayingIfDeviceGone() {
         if (!nowSession.isActive) return
@@ -557,5 +626,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         const val HEARTBEAT_INTERVAL_MS = 10_000L
         const val DEVICE_STALE_MS = 45_000L
         const val NET_RESTART_DELAY_MS = 1_500L
+
+        // 记忆上次播放（SharedPreferences key）
+        private const val KEY_DEVICE_KEY = "device_key"
+        private const val KEY_DEVICE_NAME = "device_name"
+        private const val KEY_TITLE = "title"
     }
 }

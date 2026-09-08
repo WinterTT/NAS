@@ -577,7 +577,7 @@ class MainActivity : AppCompatActivity() {
             }
             if (results.lastOrNull()?.second?.success == true) {
                 mainHandler.post {
-                    setNowPlaying(deviceName, renderer, rc, item.title)
+                    setNowPlaying(deviceName, renderer, rc, item.title, deviceKey)
                     Toast.makeText(this, "已推送给 $targetName 播放", Toast.LENGTH_SHORT).show()
                     // 操作了这台设备 -> 自动订阅其全部服务（之后别处操作也能同步）
                     vm.activateDeviceSubscription(deviceKey, device.services)
@@ -595,9 +595,10 @@ class MainActivity : AppCompatActivity() {
         deviceName: String,
         avt: UpnpService,
         rc: UpnpService?,
-        title: String
+        title: String,
+        deviceKey: String? = null
     ) {
-        nowSession.begin(deviceName, avt, rc, title)
+        nowSession.begin(deviceName, avt, rc, title, deviceKey = deviceKey)
     }
 
     /** 播放/暂停切换 → 转发给会话 */
@@ -699,7 +700,8 @@ class MainActivity : AppCompatActivity() {
                             deviceName = deviceName,
                             avt = renderer,
                             rc = rc,
-                            title = url.substringAfterLast('/').ifEmpty { url }
+                            title = url.substringAfterLast('/').ifEmpty { url },
+                            deviceKey = deviceKey
                         )
                         vm.activateDeviceSubscription(deviceKey, device.services)
                     }

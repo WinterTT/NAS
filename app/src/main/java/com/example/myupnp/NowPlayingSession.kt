@@ -37,6 +37,8 @@ class NowPlayingSession(
         val avt: UpnpService,      // AVTransport：Play/Pause/Stop/Seek
         val rc: UpnpService?,      // RenderingControl：音量（可能没有）
         val title: String,
+        /** 设备在注册表里的 key（=LOCATION），用于"记忆恢复"时重新定位 */
+        val deviceKey: String? = null,
         var playing: Boolean = false,
         // ---- 进度（秒），由 GENA 事件校准，本地 tick 推进 ----
         var positionSec: Long = 0L,
@@ -52,16 +54,50 @@ class NowPlayingSession(
     val playing: Boolean get() = session?.playing == true
 
     /** 建立会话并默认标记为播放中（事件后续会纠正） */
-    fun begin(deviceName: String, avt: UpnpService, rc: UpnpService?, title: String) {
+    fun begin(
+        deviceName: String,
+        avt: UpnpService,
+        rc: UpnpService?,
+        title: String,
+        deviceKey: String? = null,
+        playing: Boolean = true
+    ) {
         session = NowPlaying(
             deviceName = deviceName,
             avt = avt,
             rc = rc,
             title = title,
-            playing = true
+            deviceKey = deviceKey,
+            playing = playing
         )
         Log.i(TAG, "[NOW] 播放会话: $title @ $deviceName")
         listener.onChanged(this)
+    }
+
+    /**
+     * 主动问设备一次当前传输状态（GetTransportInfo）。
+     * 用于"记忆上次播放"恢复后确认设备现在到底在播/暂停/停止。
+     */
+    fun refreshTransportState() {
+        val np = session ?: return
+        controlExecutor.execute {
+            val r = SoapCaller.call(
+                np.avt.controlUrl, np.avt.serviceType, "GetTransportInfo",
+                mapOf("InstanceID" to "0")
+            )
+            mainHandler.post {
+                if (r.success) {
+                    // out 参数：<CurrentTransportState>PLAYING|PAUSED|STOPPED</...>
+                    val state = Regex("<CurrentTransportState>\\s*(\\w+)\\s*</CurrentTransportState>")
+                        .find(r.body)?.groupValues?.get(1)
+                    state?.let {
+                        np.playing = it == "PLAYING"
+                        Log.i(TAG, "[NOW] GetTransportInfo -> $it")
+                        listener.onChanged(this@NowPlayingSession)
+                    }
+                }
+            }
+        }
     }
 
     /**
