@@ -34,13 +34,18 @@ class NowPlayingSession(
     /** 一次播放会话的快照 */
     data class NowPlaying(
         val deviceName: String,
-        val avt: UpnpService,      // AVTransport：Play/Pause/Stop
+        val avt: UpnpService,      // AVTransport：Play/Pause/Stop/Seek
         val rc: UpnpService?,      // RenderingControl：音量（可能没有）
         val title: String,
-        var playing: Boolean = false
+        var playing: Boolean = false,
+        // ---- 进度（秒），由 GENA 事件校准，本地 tick 推进 ----
+        var positionSec: Long = 0L,
+        var durationSec: Long = 0L,
+        var seekable: Boolean = false   // 是否支持 Seek（有总时长才可拖）
     )
 
     private var session: NowPlaying? = null
+    private var tickPending = 0L  // 累计要补的播放秒数（毫秒精度）
 
     val current: NowPlaying? get() = session
     val isActive: Boolean get() = session != null
@@ -57,6 +62,65 @@ class NowPlayingSession(
         )
         Log.i(TAG, "[NOW] 播放会话: $title @ $deviceName")
         listener.onChanged(this)
+    }
+
+    /**
+     * 播放时钟滴答：每 1 秒调用一次，播放中则 position+1。
+     * 由 ViewModel 的协程驱动（不再用 Handler postDelayed）。
+     */
+    fun tick(stepMs: Long = 1_000L) {
+        val np = session ?: return
+        if (!np.playing) return
+        tickPending += stepMs
+        if (tickPending >= 1_000L) {
+            val secs = tickPending / 1_000L
+            tickPending -= secs * 1_000L
+            np.positionSec += secs
+            listener.onChanged(this)
+        }
+    }
+
+    /** 用 GENA 事件里的进度校准（优先于本地 tick） */
+    fun syncProgress(positionSec: Long?, durationSec: Long?) {
+        val np = session ?: return
+        durationSec?.let { np.durationSec = it }
+        positionSec?.let { np.positionSec = it }
+        np.seekable = np.durationSec > 0
+        listener.onChanged(this)
+    }
+
+    /** 跳转到指定秒（AVTransport Seek，REL_TIME 单位） */
+    fun seekTo(targetSec: Long) {
+        val np = session ?: return
+        if (np.durationSec <= 0) return
+        val target = targetSec.coerceIn(0, np.durationSec)
+        Log.i(TAG, "[NOW] Seek → ${formatTime(target)} @ ${np.deviceName}")
+        // 先乐观更新本地进度（设备执行后事件会再校准）
+        np.positionSec = target
+        listener.onChanged(this)
+        controlExecutor.execute {
+            val r = SoapCaller.call(
+                np.avt.controlUrl, np.avt.serviceType, "Seek",
+                mapOf(
+                    "InstanceID" to "0",
+                    "Unit" to "REL_TIME",
+                    "Target" to formatTime(target)
+                )
+            )
+            mainHandler.post {
+                if (!r.success) {
+                    Log.w(TAG, "[NOW!] Seek 失败: ${r.summary()}")
+                }
+            }
+        }
+    }
+
+    /** 秒 -> "HH:MM:SS"（UPnP REL_TIME 需要） */
+    private fun formatTime(totalSec: Long): String {
+        val h = totalSec / 3600
+        val m = (totalSec % 3600) / 60
+        val s = totalSec % 60
+        return "%02d:%02d:%02d".format(h, m, s)
     }
 
     /** 播放/暂停切换 */

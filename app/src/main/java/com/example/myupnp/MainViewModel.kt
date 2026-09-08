@@ -94,6 +94,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     )
 
     // ------------------------------------------------------------------
+    // 播放进度 ticker：常驻轻量循环，播放中每秒推进一次本地进度
+    // ------------------------------------------------------------------
+
+    init {
+        viewModelScope.launch {
+            while (isActive) {
+                nowSession.tick(1_000L)   // 仅在 playing 时真正推进并回调
+                delay(1_000L)
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------
     // 扫描子系统（第 3 批：从 Activity 收编到这里）
     // ------------------------------------------------------------------
 
@@ -314,8 +327,27 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 if (eventServiceUrl != null) {
                     nowSession.applyEvent(eventServiceUrl, lc.transportState)
+                    // 进度校准：用设备报告的时长/位置覆盖本地 tick
+                    nowSession.syncProgress(
+                        positionSec = lc.relativeTimePosition?.let(::hmsToSec),
+                        durationSec = lc.currentTrackDuration?.let(::hmsToSec)
+                    )
                 }
             }
+        }
+    }
+
+    /** "HH:MM:SS" / "MM:SS" -> 秒；解析失败返回 null */
+    private fun hmsToSec(hms: String): Long? {
+        val parts = hms.split(":")
+        return try {
+            when (parts.size) {
+                3 -> parts[0].toLong() * 3600 + parts[1].toLong() * 60 + parts[2].toLong()
+                2 -> parts[0].toLong() * 60 + parts[1].toLong()
+                else -> null
+            }
+        } catch (_: NumberFormatException) {
+            null
         }
     }
 
@@ -349,6 +381,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val nowPlayingDevice: String = "",
         val nowPlayingPlaying: Boolean = false,
         val nowPlayingHasRc: Boolean = false,
+        val positionSec: Long = 0L,
+        val durationSec: Long = 0L,
+        val seekable: Boolean = false,
     )
 
     private val _uiState = MutableStateFlow(UiState())
@@ -421,6 +456,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 nowPlayingDevice = np?.deviceName.orEmpty(),
                 nowPlayingPlaying = np?.playing == true,
                 nowPlayingHasRc = np?.rc != null,
+                positionSec = np?.positionSec ?: 0L,
+                durationSec = np?.durationSec ?: 0L,
+                seekable = np?.seekable == true,
             )
         }
     }

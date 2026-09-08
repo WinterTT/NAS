@@ -74,6 +74,12 @@ class MainActivity : AppCompatActivity() {
     private lateinit var btnNowStop: ImageButton
     private lateinit var btnNowVolDown: ImageButton
     private lateinit var btnNowVolUp: ImageButton
+    private lateinit var seekNow: android.widget.SeekBar
+    private lateinit var tvNowTime: TextView
+    private lateinit var tvNowDuration: TextView
+
+    /** 用户正在拖动进度条（避免 ticker 抢进度） */
+    private var seekDragging = false
 
     // ===== MVVM：对象与线程池全部归 ViewModel，Activity 只引用 =====
     private val mainHandler: Handler get() = vm.mainHandler
@@ -197,11 +203,36 @@ class MainActivity : AppCompatActivity() {
         btnNowStop = findViewById(R.id.btnNowStop)
         btnNowVolDown = findViewById(R.id.btnNowVolDown)
         btnNowVolUp = findViewById(R.id.btnNowVolUp)
+        seekNow = findViewById(R.id.seekNow)
+        tvNowTime = findViewById(R.id.tvNowTime)
+        tvNowDuration = findViewById(R.id.tvNowDuration)
 
         btnNowPlayPause.setOnClickListener { togglePlayPause() }
         btnNowStop.setOnClickListener { stopNowPlaying() }
         btnNowVolDown.setOnClickListener { volumeStepNow(-10) }
         btnNowVolUp.setOnClickListener { volumeStepNow(10) }
+
+        // 进度条：拖动中不更新（ticker 停手），松手发 Seek
+        seekNow.setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(bar: android.widget.SeekBar?, progress: Int, fromUser: Boolean) {
+                if (fromUser) {
+                    tvNowTime.text = fmtDuration(progress.toLong())
+                }
+            }
+
+            override fun onStartTrackingTouch(bar: android.widget.SeekBar?) {
+                seekDragging = true
+            }
+
+            override fun onStopTrackingTouch(bar: android.widget.SeekBar?) {
+                seekDragging = false
+                val dur = vm.uiState.value.durationSec
+                if (dur > 0) {
+                    val target = bar?.progress?.toLong()?.coerceIn(0, dur) ?: return
+                    nowSession.seekTo(target)
+                }
+            }
+        })
 
         // ===== MVVM：UI 观察 ViewModel 状态（第 1+2 批） =====
         // 通用 UI 状态：扫描按钮/状态栏/计数/正在播放控制条
@@ -231,6 +262,15 @@ class MainActivity : AppCompatActivity() {
                     val volAlpha = if (s.nowPlayingHasRc) 1.0f else 0.3f
                     btnNowVolDown.alpha = volAlpha
                     btnNowVolUp.alpha = volAlpha
+                    // 进度：不拖动时才跟随状态，避免与用户拖拽打架
+                    if (!seekDragging) {
+                        val dur = if (s.durationSec > 0) s.durationSec else 1
+                        seekNow.max = dur.toInt()
+                        seekNow.progress = s.positionSec.coerceIn(0, s.durationSec).toInt()
+                    }
+                    tvNowTime.text = fmtDuration(s.positionSec)
+                    tvNowDuration.text = fmtDuration(s.durationSec)
+                    seekNow.isEnabled = s.seekable && !s.nowPlayingDevice.isEmpty()
                 } else {
                     nowPlayingBar.visibility = View.GONE
                 }
@@ -809,6 +849,14 @@ class MainActivity : AppCompatActivity() {
         if (fromId.isNotBlank()) return fromId
         val fromType = s.serviceType.substringAfter(":service:").substringBefore(":")
         return fromType.ifBlank { s.serviceType }
+    }
+
+    /** 秒 -> "m:ss" 显示（进度条两侧） */
+    private fun fmtDuration(totalSec: Long): String {
+        if (totalSec <= 0) return "0:00"
+        val m = totalSec / 60
+        val s = totalSec % 60
+        return "$m:$s"
     }
 
     // ------------------------------------------------------------------
