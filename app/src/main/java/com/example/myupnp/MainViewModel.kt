@@ -18,6 +18,7 @@ import com.example.myupnp.gena.EventProperties
 import com.example.myupnp.gena.GenaClient
 import com.example.myupnp.gena.LocalEventServer
 import com.example.myupnp.gena.LocalIp
+import com.example.myupnp.model.MediaItem
 import com.example.myupnp.model.UpnpDevice
 import com.example.myupnp.model.UpnpService
 import com.example.myupnp.ssdp.SsdpDiscovery
@@ -84,8 +85,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             override fun onChanged(session: NowPlayingSession) {
                 syncNowPlayingState()
             }
+
+            /** 一首自然播完（不是手动停止）-> 自动连播排队的第一首 */
+            override fun onTrackEnded(session: NowPlayingSession) {
+                autoAdvanceQueue()
+            }
         }
     )
+
+    /** 播放队列（第 7 课 B）：排队 + 播完自动连播 */
+    val playbackQueue = PlaybackQueue()
 
     val subManager = SubscriptionManager(
         mainHandler = mainHandler,
@@ -430,6 +439,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val seekable: Boolean = false,
         /** 当前音量 0-100，null = 未知（无 RenderingControl 或未读到） */
         val volume: Int? = null,
+        /** 播放队列：还有几首待播（连播用） */
+        val queuePendingCount: Int = 0,
+        /** 播放队列：当前这首的标题（队列来源时显示） */
+        val queueCurrentTitle: String = "",
     )
 
     private val _uiState = MutableStateFlow(UiState())
@@ -508,6 +521,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 durationSec = np?.durationSec ?: 0L,
                 seekable = np?.seekable == true,
                 volume = np?.volume,
+                queuePendingCount = playbackQueue.pendingCount,
+                queueCurrentTitle = playbackQueue.current?.title.orEmpty(),
             )
         }
         // 有会话就记忆"上次在播什么"（重启后恢复用）
@@ -519,6 +534,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             )
         } else {
             clearLastSession()
+        }
+    }
+
+    /** 队列记账变化后刷新 UI 里的队列角标（只动队列字段） */
+    private fun syncQueueUi() {
+        _uiState.update {
+            it.copy(
+                queuePendingCount = playbackQueue.pendingCount,
+                queueCurrentTitle = playbackQueue.current?.title.orEmpty(),
+            )
         }
     }
 
@@ -585,6 +610,125 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             h == playingHost
         }
         if (!stillAlive) nowSession.end("设备已离线")
+    }
+
+    // ------------------------------------------------------------------
+    // 第 7 课 B：播放队列（点歌排队 + 播完自动连播）
+    // ------------------------------------------------------------------
+    // 队列的记账都在主线程（UI 点击 / 事件回调 / onTrackEnded 都经主线程），
+    // 网络推送丢 controlExecutor，成功后 mainHandler 回主线程再记账。
+
+    /** 点歌 -> "加入队列"：排到队尾，当前这首播完自动连播 */
+    fun queueEnqueue(item: MediaItem) {
+        playbackQueue.enqueue(item)
+        syncQueueUi()
+        postMessage(
+            if (nowSession.isActive)
+                "已加入队列（${playbackQueue.pendingCount} 首待播）：当前这首播完自动连播"
+            else
+                "已加入队列（${playbackQueue.pendingCount} 首）：先播放一首，之后自动接上"
+        )
+    }
+
+    /** 点歌 -> "播放"且推送成功后调用：记成"当前这首"，已排队的歌不受影响 */
+    fun queueOnPlayed(item: MediaItem) {
+        playbackQueue.commitPlayNow(item)
+        syncQueueUi()
+    }
+
+    /** 控制条"下一首"：跳过当前，直接播排队的第一首 */
+    fun queueNextItem() {
+        val item = playbackQueue.nextUp
+        if (item == null) {
+            postMessage("没有下一首了（队列已播完）")
+            return
+        }
+        pushQueueItem(item) {
+            playbackQueue.commitNext(item)
+            syncQueueUi()
+        }
+    }
+
+    /** 控制条"上一首"：回放最近播完的那首（当前这首放回队首，播完再接上） */
+    fun queuePreviousItem() {
+        val item = playbackQueue.previousUp
+        if (item == null) {
+            postMessage("没有上一首（前面还没播过歌）")
+            return
+        }
+        pushQueueItem(item) {
+            playbackQueue.commitPrevious(item)
+            syncQueueUi()
+        }
+    }
+
+    /** 队列列表里点第 index 首：立即切到它播（从待播里拿走） */
+    fun queuePlayPendingAt(index: Int) {
+        val item = playbackQueue.pendingAt(index)
+        if (item == null) {
+            postMessage("队列里没有这一首")
+            return
+        }
+        pushQueueItem(item) {
+            playbackQueue.commitPlayNow(item)
+            syncQueueUi()
+        }
+    }
+
+    fun queueClear() {
+        playbackQueue.clear()
+        syncQueueUi()
+        postMessage("已清空播放队列")
+    }
+
+    /** 供 UI 弹队列列表用（主线程读取，安全） */
+    fun queuePendingSnapshot(): List<MediaItem> = playbackQueue.snapshotPending()
+
+    /** 一首自然播完 -> 自动连播队首 */
+    private fun autoAdvanceQueue() {
+        val item = playbackQueue.nextUp
+        if (item == null) {
+            if (playbackQueue.hasActivity) postMessage("队列已播完")
+            return
+        }
+        pushQueueItem(item) {
+            playbackQueue.commitNext(item)
+            syncQueueUi()
+        }
+    }
+
+    /**
+     * 把队列里的一首推给"当前会话"钉住的播放器（同一台设备继续播）。
+     * 推送成功才记账/切会话；失败保留队列原状。
+     */
+    private fun pushQueueItem(item: MediaItem, onSuccess: () -> Unit) {
+        val np = nowSession.current
+        if (np == null) {
+            postMessage("还没有正在播放的设备：先推一首歌开始播，连播才有目标", isError = true)
+            return
+        }
+        Log.i(TAG, "[QUEUE] 推送队列歌曲: ${item.title} → ${np.deviceName}")
+        controlExecutor.execute {
+            val results = DlnaPlayer.pushAndPlay(np.avt, item.resUrl, item.title)
+            mainHandler.post {
+                if (results.lastOrNull()?.second?.success == true) {
+                    onSuccess()
+                    nowSession.begin(
+                        deviceName = np.deviceName,
+                        avt = np.avt,
+                        rc = np.rc,
+                        title = item.title,
+                        deviceKey = np.deviceKey
+                    )
+                    postMessage("▶ 正在播放：《${item.title}》")
+                } else {
+                    postMessage(
+                        "推送队列歌曲失败：${results.lastOrNull()?.second?.summary()}",
+                        isError = true
+                    )
+                }
+            }
+        }
     }
 
     // ------------------------------------------------------------------

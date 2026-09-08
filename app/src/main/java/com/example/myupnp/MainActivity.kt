@@ -80,6 +80,11 @@ class MainActivity : AppCompatActivity() {
     private lateinit var tvNowDuration: TextView
     private lateinit var tvNowVolume: TextView
 
+    // ===== 第 7 课 B：播放队列控件（上一首/下一首 + 队列入口） =====
+    private lateinit var btnNowPrev: ImageButton
+    private lateinit var btnNowNext: ImageButton
+    private lateinit var tvNowQueue: TextView
+
     /** 用户正在拖动进度条（避免 ticker 抢进度） */
     private var seekDragging = false
 
@@ -209,11 +214,18 @@ class MainActivity : AppCompatActivity() {
         tvNowTime = findViewById(R.id.tvNowTime)
         tvNowDuration = findViewById(R.id.tvNowDuration)
         tvNowVolume = findViewById(R.id.tvNowVolume)
+        btnNowPrev = findViewById(R.id.btnNowPrev)
+        btnNowNext = findViewById(R.id.btnNowNext)
+        tvNowQueue = findViewById(R.id.tvNowQueue)
 
         btnNowPlayPause.setOnClickListener { togglePlayPause() }
         btnNowStop.setOnClickListener { stopNowPlaying() }
         btnNowVolDown.setOnClickListener { volumeStepNow(-10) }
         btnNowVolUp.setOnClickListener { volumeStepNow(10) }
+        // 第 7 课 B：播放队列
+        btnNowPrev.setOnClickListener { vm.queuePreviousItem() }
+        btnNowNext.setOnClickListener { vm.queueNextItem() }
+        tvNowQueue.setOnClickListener { showQueueDialog() }
 
         // 进度条：拖动中不更新（ticker 停手），松手发 Seek
         seekNow.setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
@@ -277,6 +289,8 @@ class MainActivity : AppCompatActivity() {
                     // 音量显示（未知显示 --）
                     tvNowVolume.text = s.volume?.toString() ?: "--"
                     tvNowVolume.visibility = if (s.nowPlayingHasRc) View.VISIBLE else View.GONE
+                    // 播放队列：待播几首显示在入口上
+                    tvNowQueue.text = "队列(${s.queuePendingCount})"
                 } else {
                     nowPlayingBar.visibility = View.GONE
                 }
@@ -452,7 +466,7 @@ class MainActivity : AppCompatActivity() {
                     if (obj is MediaContainer) {
                         itemActions += { showMediaLevel(cds, obj.id, crumb + (obj.id to obj.title)) }
                     } else if (obj is MediaItem) {
-                        itemActions += { playMediaItemFromServer(obj) }
+                        itemActions += { mediaItemOptions(obj) }
                     }
                 }
 
@@ -559,6 +573,64 @@ class MainActivity : AppCompatActivity() {
         btnRefresh.setOnClickListener { refresh() }
     }
 
+    /** 曲库里点一首歌：先问"立即播放 / 加入队列"，再决定走哪条路 */
+    private fun mediaItemOptions(item: MediaItem) {
+        if (item.resUrl.isBlank()) {
+            Toast.makeText(this, "该条目没有可播放地址(res)", Toast.LENGTH_SHORT).show()
+            return
+        }
+        AlertDialog.Builder(this)
+            .setTitle(item.title)
+            .setItems(
+                arrayOf(
+                    "立即播放",
+                    "加入队列（播完自动连播）"
+                )
+            ) { _, which ->
+                when (which) {
+                    0 -> playMediaItemFromServer(item)
+                    1 -> vm.queueEnqueue(item)
+                }
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    /** 队列总览：正在播 + 接下来 N 首；点待播一首 = 立即切到它 */
+    private fun showQueueDialog() {
+        val queue = vm.playbackQueue
+        val pending = vm.queuePendingSnapshot()
+        val rows = ArrayList<String>()
+        val actions = ArrayList<(() -> Unit)?>()
+
+        queue.current?.let {
+            rows += "▶ 正在播放：《${it.title}》"
+            actions += null
+        }
+        if (pending.isEmpty()) {
+            rows += if (queue.hasActivity) "—— 接下来没有了 ——"
+            else "队列是空的：去曲库点歌选「加入队列」"
+            actions += null
+        } else {
+            for ((i, it) in pending.withIndex()) {
+                rows += "${i + 1}. ${it.title}"
+                actions += { vm.queuePlayPendingAt(i) }
+            }
+        }
+        if (queue.historyCount > 0) {
+            rows += "…已播 ${queue.historyCount} 首（控制条「上一首」可回放）"
+            actions += null
+        }
+        AlertDialog.Builder(this)
+            .setTitle("播放队列")
+            .setItems(rows.toTypedArray()) { _, which ->
+                actions.getOrNull(which)?.invoke()
+            }
+            .setNeutralButton("清空队列") { _, _ -> vm.queueClear() }
+            .setNegativeButton("关闭", null)
+            .show()
+    }
+
     /** 真正推送一首歌到指定播放器（含日志、结果、自动订阅 + 显示控制条） */
     private fun pushToRenderer(
         renderer: UpnpService,
@@ -583,6 +655,8 @@ class MainActivity : AppCompatActivity() {
             if (results.lastOrNull()?.second?.success == true) {
                 mainHandler.post {
                     setNowPlaying(deviceName, renderer, rc, item.title, deviceKey)
+                    // 记入播放队列的"当前这首"（排队的歌会在播完后自动接上）
+                    vm.queueOnPlayed(item)
                     Toast.makeText(this, "已推送给 $targetName 播放", Toast.LENGTH_SHORT).show()
                     // 操作了这台设备 -> 自动订阅其全部服务（之后别处操作也能同步）
                     vm.activateDeviceSubscription(deviceKey, device.services)

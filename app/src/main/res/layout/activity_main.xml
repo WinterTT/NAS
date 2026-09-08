@@ -197,6 +197,58 @@
                 android:textColor="@color/now_bar_subtext"
                 android:textSize="11sp" />
         </LinearLayout>
+
+        <!-- 第三行：第 7 课 B 播放队列（上一首 / 下一首 + 队列入口） -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <ImageButton
+                android:id="@+id/btnNowPrev"
+                android:layout_width="44dp"
+                android:layout_height="40dp"
+                android:background="?android:attr/selectableItemBackgroundBorderless"
+                android:contentDescription="上一首"
+                android:src="@drawable/ic_prev" />
+
+            <ImageButton
+                android:id="@+id/btnNowNext"
+                android:layout_width="44dp"
+                android:layout_height="40dp"
+                android:background="?android:attr/selectableItemBackgroundBorderless"
+                android:contentDescription="下一首"
+                android:src="@drawable/ic_next" />
+
+            <TextView
+                android:id="@+id/tvNowQueue"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="6dp"
+                android:paddingHorizontal="10dp"
+                android:paddingVertical="4dp"
+                android:background="?android:attr/selectableItemBackground"
+                android:text="队列(0)"
+                android:textColor="@color/now_bar_text"
+                android:textSize="12sp" />
+
+            <Space
+                android:layout_width="0dp"
+                android:layout_height="1dp"
+                android:layout_weight="1" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:drawableStart="@drawable/ic_queue"
+                android:drawablePadding="4dp"
+                android:drawableTint="@color/now_bar_subtext"
+                android:gravity="center_vertical"
+                android:text="@string/queue_bar_hint"
+                android:textColor="@color/now_bar_subtext"
+                android:textSize="11sp" />
+        </LinearLayout>
     </LinearLayout>
 
 </LinearLayout>

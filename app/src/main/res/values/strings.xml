@@ -8,4 +8,5 @@
     <string name="device_title">发现的设备</string>
     <string name="nearby_wifi_rationale">需要「附近的设备」权限以在局域网中发现 UPnP 设备</string>
     <string name="now_playing_hint">未在播放 — 点歌后可在此控制</string>
+    <string name="queue_bar_hint">点「队列」查看/切歌</string>
 </resources>
