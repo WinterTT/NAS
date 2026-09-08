@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- Tab 设备：音箱（主体 + 喇叭圆 + 底座） -->
+    <path
+        android:fillColor="#FF000000"
+        android:pathData="M4,3h16c0.55,0 1,0.45 1,1v10c0,0.55 -0.45,1 -1,1H4c-0.55,0 -1,-0.45 -1,-1V4c0,-0.55 0.45,-1 1,-1z M12,5c-2.21,0 -4,1.79 -4,4s1.79,4 4,4 4,-1.79 4,-4 -1.79,-4 -4,-4z M12,12.5c-1.93,0 -3.5,1.57 -3.5,3.5v1h7v-1c0,-1.93 -1.57,-3.5 -3.5,-3.5z" />
+</vector>

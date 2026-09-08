@@ -105,6 +105,20 @@ object DlnaPlayer {
         )
     }
 
+    /** 直接设音量到指定值（RenderingControl，音量滑杆用） */
+    fun setVolume(rc: UpnpService, volume: Int): SoapCaller.SoapResult {
+        return SoapCaller.call(
+            controlUrl = rc.controlUrl,
+            serviceType = rc.serviceType,
+            actionName = "SetVolume",
+            args = mapOf(
+                "InstanceID" to INSTANCE_ID,
+                "Channel" to "Master",
+                "DesiredVolume" to volume.coerceIn(0, 100).toString()
+            )
+        )
+    }
+
     /** 读当前音量；读不到返回 -1 */
     fun getVolume(rc: UpnpService): Int {
         val r = SoapCaller.call(

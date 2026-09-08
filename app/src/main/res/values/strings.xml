@@ -5,8 +5,22 @@
     <string name="btn_clear">清空设备</string>
     <string name="status_idle">空闲：请连接 Wi-Fi 后点击「开始扫描」</string>
     <string name="status_scanning">正在扫描 SSDP 组播组 239.255.255.250:1900 …</string>
-    <string name="device_title">发现的设备</string>
+    <string name="device_title">设备</string>
     <string name="nearby_wifi_rationale">需要「附近的设备」权限以在局域网中发现 UPnP 设备</string>
     <string name="now_playing_hint">未在播放 — 点歌后可在此控制</string>
     <string name="queue_bar_hint">点「队列」查看/切歌</string>
+
+    <!-- 底部导航 -->
+    <string name="tab_playing">播放</string>
+    <string name="tab_library">媒体库</string>
+    <string name="tab_devices">设备</string>
+
+    <!-- 播放页空态 -->
+    <string name="play_page_empty">还没有正在播放的歌曲\n从「媒体库」或「设备」里挑一首推过来吧</string>
+
+    <!-- 媒体库页 -->
+    <string name="lib_title">媒体服务器</string>
+    <string name="lib_subtitle">点一台服务器浏览它的曲库</string>
+    <string name="lib_empty">还没发现媒体服务器\n请先在「设备」页点「开始扫描」，然后回到这里</string>
+    <string name="swipe_hint">下滑收起本页</string>
 </resources>

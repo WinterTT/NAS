@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
     android:id="@+id/main"
     android:layout_width="match_parent"
@@ -8,376 +9,575 @@
     android:orientation="vertical"
     tools:context=".MainActivity">
 
-    <!-- ================= 顶栏：标题 + 扫描开关 ================= -->
-    <LinearLayout
+    <!-- ============ 页面容器：播放 / 媒体库 / 设备 ============ -->
+    <FrameLayout
+        android:id="@+id/contentHost"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginStart="16dp"
-        android:layout_marginTop="14dp"
-        android:layout_marginEnd="16dp"
-        android:gravity="center_vertical"
-        android:orientation="horizontal">
+        android:layout_height="0dp"
+        android:layout_weight="1">
 
-        <TextView
-            android:id="@+id/tvAppTitle"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="@string/app_name"
-            android:textColor="@color/text_primary"
-            android:textSize="20sp"
-            android:textStyle="bold" />
-
-        <androidx.appcompat.widget.AppCompatButton
-            android:id="@+id/btnStart"
-            android:layout_width="wrap_content"
-            android:layout_height="40dp"
-            android:background="@drawable/bg_pill_primary"
-            android:minWidth="0dp"
-            android:paddingStart="18dp"
-            android:paddingEnd="18dp"
-            android:stateListAnimator="@null"
-            android:text="@string/btn_start"
-            android:textAllCaps="false"
-            android:textColor="@color/on_brand"
-            android:textSize="13sp" />
-
-        <androidx.appcompat.widget.AppCompatButton
-            android:id="@+id/btnStop"
-            android:layout_width="wrap_content"
-            android:layout_height="40dp"
-            android:layout_marginStart="8dp"
-            android:background="@drawable/bg_pill_ghost"
-            android:minWidth="0dp"
-            android:paddingStart="18dp"
-            android:paddingEnd="18dp"
-            android:stateListAnimator="@null"
-            android:text="@string/btn_stop"
-            android:textAllCaps="false"
-            android:textColor="@color/text_primary"
-            android:textSize="13sp"
-            android:visibility="gone"
-            tools:visibility="visible" />
-    </LinearLayout>
-
-    <!-- 状态行（空闲/扫描中/Wi-Fi 断开等文案） -->
-    <TextView
-        android:id="@+id/tvStatus"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginHorizontal="16dp"
-        android:layout_marginTop="6dp"
-        android:text="@string/status_idle"
-        android:textColor="@color/text_secondary"
-        android:textSize="13sp" />
-
-    <!-- ================ 正在播放 · 大卡（有播放会话才出现） ================ -->
-    <LinearLayout
-        android:id="@+id/nowPlayingBar"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginHorizontal="12dp"
-        android:layout_marginTop="12dp"
-        android:background="@drawable/bg_now_bar"
-        android:orientation="vertical"
-        android:padding="12dp"
-        android:visibility="gone"
-        tools:visibility="visible">
-
-        <!-- 第一行：大封面 + 曲目信息 + 队列入口 -->
+        <!-- ========== 页 1：设备（默认页：扫描 + 设备列表） ========== -->
         <LinearLayout
+            android:id="@+id/pageDevices"
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:gravity="center_vertical"
-            android:orientation="horizontal">
+            android:layout_height="match_parent"
+            android:orientation="vertical">
 
+            <!-- 顶栏：标题 + 扫描开关 -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="16dp"
+                android:layout_marginTop="14dp"
+                android:layout_marginEnd="16dp"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:id="@+id/tvAppTitle"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="@string/app_name"
+                    android:textColor="@color/text_primary"
+                    android:textSize="20sp"
+                    android:textStyle="bold" />
+
+                <androidx.appcompat.widget.AppCompatButton
+                    android:id="@+id/btnStart"
+                    android:layout_width="wrap_content"
+                    android:layout_height="40dp"
+                    android:background="@drawable/bg_pill_primary"
+                    android:minWidth="0dp"
+                    android:paddingStart="18dp"
+                    android:paddingEnd="18dp"
+                    android:stateListAnimator="@null"
+                    android:text="@string/btn_start"
+                    android:textAllCaps="false"
+                    android:textColor="@color/on_brand"
+                    android:textSize="13sp" />
+
+                <androidx.appcompat.widget.AppCompatButton
+                    android:id="@+id/btnStop"
+                    android:layout_width="wrap_content"
+                    android:layout_height="40dp"
+                    android:layout_marginStart="8dp"
+                    android:background="@drawable/bg_pill_ghost"
+                    android:minWidth="0dp"
+                    android:paddingStart="18dp"
+                    android:paddingEnd="18dp"
+                    android:stateListAnimator="@null"
+                    android:text="@string/btn_stop"
+                    android:textAllCaps="false"
+                    android:textColor="@color/text_primary"
+                    android:textSize="13sp"
+                    android:visibility="gone"
+                    tools:visibility="visible" />
+            </LinearLayout>
+
+            <!-- 状态行 -->
+            <TextView
+                android:id="@+id/tvStatus"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginHorizontal="16dp"
+                android:layout_marginTop="6dp"
+                android:text="@string/status_idle"
+                android:textColor="@color/text_secondary"
+                android:textSize="13sp" />
+
+            <!-- 设备区标题 + 清空 -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="16dp"
+                android:layout_marginTop="14dp"
+                android:layout_marginEnd="16dp"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:id="@+id/tvDeviceTitle"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:ellipsize="end"
+                    android:maxLines="1"
+                    android:text="@string/device_title"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="13sp"
+                    android:textStyle="bold" />
+
+                <androidx.appcompat.widget.AppCompatButton
+                    android:id="@+id/btnClear"
+                    android:layout_width="wrap_content"
+                    android:layout_height="32dp"
+                    android:background="@drawable/bg_pill_ghost"
+                    android:minWidth="0dp"
+                    android:paddingStart="14dp"
+                    android:paddingEnd="14dp"
+                    android:stateListAnimator="@null"
+                    android:text="@string/btn_clear"
+                    android:textAllCaps="false"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="12sp" />
+            </LinearLayout>
+
+            <!-- 首页常驻的"播放队列"入口 -->
+            <TextView
+                android:id="@+id/tvQueueEntry"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginHorizontal="12dp"
+                android:layout_marginTop="10dp"
+                android:background="@drawable/bg_row_card"
+                android:drawableStart="@drawable/ic_queue"
+                android:drawablePadding="6dp"
+                android:drawableTint="@color/text_secondary"
+                android:gravity="center_vertical"
+                android:paddingHorizontal="12dp"
+                android:paddingVertical="8dp"
+                android:text="播放队列"
+                android:textColor="@color/text_primary"
+                android:textSize="12sp"
+                android:visibility="gone"
+                tools:visibility="gone" />
+
+            <!-- 设备列表 + 空态 -->
+            <FrameLayout
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_marginHorizontal="12dp"
+                android:layout_marginTop="4dp"
+                android:layout_weight="1">
+
+                <ListView
+                    android:id="@+id/listDevices"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:clipToPadding="false"
+                    android:divider="@null"
+                    android:dividerHeight="0dp"
+                    android:paddingBottom="8dp" />
+
+                <TextView
+                    android:id="@+id/tvEmpty"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="center"
+                    android:gravity="center"
+                    android:lineSpacingExtra="4dp"
+                    android:textColor="@color/text_faint"
+                    android:textSize="14sp"
+                    android:visibility="gone"
+                    tools:visibility="visible"
+                    tools:text="还没有发现设备\n点右上角「开始扫描」" />
+            </FrameLayout>
+        </LinearLayout>
+
+        <!-- ========== 页 2：媒体库（服务器 → 曲库浏览） ========== -->
+        <LinearLayout
+            android:id="@+id/pageLibrary"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:orientation="vertical"
+            android:visibility="gone"
+            tools:visibility="gone">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="16dp"
+                android:layout_marginTop="16dp"
+                android:layout_marginEnd="16dp"
+                android:text="@string/lib_title"
+                android:textColor="@color/text_primary"
+                android:textSize="18sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginHorizontal="16dp"
+                android:layout_marginTop="2dp"
+                android:text="@string/lib_subtitle"
+                android:textColor="@color/text_secondary"
+                android:textSize="12sp" />
+
+            <FrameLayout
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_marginHorizontal="12dp"
+                android:layout_marginTop="8dp"
+                android:layout_weight="1">
+
+                <ListView
+                    android:id="@+id/listLibrary"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:clipToPadding="false"
+                    android:divider="@null"
+                    android:dividerHeight="0dp"
+                    android:paddingBottom="8dp" />
+
+                <TextView
+                    android:id="@+id/tvLibEmpty"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="center"
+                    android:gravity="center"
+                    android:lineSpacingExtra="4dp"
+                    android:text="@string/lib_empty"
+                    android:textColor="@color/text_faint"
+                    android:textSize="14sp"
+                    android:visibility="gone"
+                    tools:visibility="visible" />
+            </FrameLayout>
+        </LinearLayout>
+
+        <!-- ========== 页 3：正在播放（完整页） ========== -->
+        <FrameLayout
+            android:id="@+id/pagePlay"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:visibility="gone"
+            tools:visibility="visible">
+
+            <!-- 背景氛围（封面放大 + 透明） -->
             <ImageView
-                android:id="@+id/imgNowArt"
-                android:layout_width="64dp"
-                android:layout_height="64dp"
-                android:background="@drawable/bg_art_round"
-                android:clipToOutline="true"
-                android:contentDescription="专辑封面"
-                android:outlineProvider="background"
+                android:id="@+id/imgGlow"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:alpha="0.16"
+                android:contentDescription="@null"
                 android:scaleType="centerCrop"
                 android:visibility="gone"
-                tools:visibility="visible" />
+                tools:visibility="gone" />
 
+            <!-- 正在播放内容面板（有会话才显示） -->
             <LinearLayout
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="12dp"
-                android:layout_weight="1"
-                android:orientation="vertical">
+                android:id="@+id/nowPlayingBar"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:gravity="center_horizontal"
+                android:orientation="vertical"
+                android:paddingHorizontal="28dp"
+                android:visibility="gone"
+                tools:visibility="visible">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:text="@string/swipe_hint"
+                    android:textColor="@color/text_faint"
+                    android:textSize="11sp" />
+
+                <ImageView
+                    android:id="@+id/imgNowArt"
+                    android:layout_width="240dp"
+                    android:layout_height="240dp"
+                    android:layout_marginTop="20dp"
+                    android:background="@drawable/bg_art_round"
+                    android:clipToOutline="true"
+                    android:contentDescription="专辑封面"
+                    android:outlineProvider="background"
+                    android:scaleType="centerCrop"
+                    android:visibility="gone"
+                    tools:visibility="visible" />
 
                 <TextView
                     android:id="@+id/tvNowTitle"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:ellipsize="end"
+                    android:layout_marginTop="18dp"
+                    android:ellipsize="marquee"
+                    android:gravity="center"
                     android:maxLines="1"
                     android:text="@string/now_playing_hint"
-                    android:textColor="@color/now_bar_text"
-                    android:textSize="17sp"
+                    android:textColor="@color/text_primary"
+                    android:textSize="20sp"
                     android:textStyle="bold" />
 
-                <!-- 歌手 · 专辑 -->
                 <TextView
                     android:id="@+id/tvNowMeta"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="2dp"
+                    android:layout_marginTop="4dp"
                     android:ellipsize="end"
+                    android:gravity="center"
                     android:maxLines="1"
-                    android:textColor="@color/now_bar_subtext"
-                    android:textSize="13sp"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="14sp"
                     android:visibility="gone"
                     tools:visibility="visible" />
 
-                <!-- 播放在哪台设备 + 音量 -->
+                <TextView
+                    android:id="@+id/tvNowDevice"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:textColor="@color/text_faint"
+                    android:textSize="12sp" />
+
+                <!-- 进度 -->
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="3dp"
+                    android:layout_marginTop="10dp"
                     android:gravity="center_vertical"
                     android:orientation="horizontal">
 
                     <TextView
-                        android:id="@+id/tvNowDevice"
+                        android:id="@+id/tvNowTime"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:minWidth="38dp"
+                        android:gravity="center"
+                        android:text="0:00"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="12sp" />
+
+                    <SeekBar
+                        android:id="@+id/seekNow"
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
-                        android:ellipsize="end"
-                        android:maxLines="1"
-                        android:textColor="@color/now_bar_subtext"
-                        android:textSize="11sp" />
+                        android:max="1000"
+                        android:progressTint="@color/brand"
+                        android:thumbTint="@color/brand" />
+
+                    <TextView
+                        android:id="@+id/tvNowDuration"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:minWidth="38dp"
+                        android:gravity="center"
+                        android:text="0:00"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="12sp" />
+                </LinearLayout>
+
+                <!-- 音量滑杆（有 RenderingControl 才显示） -->
+                <LinearLayout
+                    android:id="@+id/volRow"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal"
+                    android:visibility="gone"
+                    tools:visibility="visible">
+
+                    <ImageView
+                        android:layout_width="18dp"
+                        android:layout_height="18dp"
+                        android:contentDescription="@null"
+                        android:src="@drawable/ic_vol_down"
+                        android:tint="@color/text_secondary" />
+
+                    <SeekBar
+                        android:id="@+id/seekVol"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_marginHorizontal="4dp"
+                        android:layout_weight="1"
+                        android:max="100"
+                        android:progressTint="@color/brand"
+                        android:thumbTint="@color/brand" />
 
                     <TextView
                         android:id="@+id/tvNowVolume"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:drawablePadding="3dp"
-                        android:drawableStart="@drawable/ic_vol_up"
-                        android:drawableTint="@color/now_bar_subtext"
                         android:gravity="center_vertical"
-                        android:minHeight="16dp"
+                        android:minWidth="26dp"
                         android:text="--"
-                        android:textColor="@color/now_bar_subtext"
+                        android:textColor="@color/text_secondary"
                         android:textSize="12sp" />
                 </LinearLayout>
+
+                <!-- 主控制行：上一首 / 播放 / 下一首 -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <Space
+                        android:layout_width="0dp"
+                        android:layout_height="1dp"
+                        android:layout_weight="1" />
+
+                    <ImageButton
+                        android:id="@+id/btnNowPrev"
+                        android:layout_width="48dp"
+                        android:layout_height="48dp"
+                        android:background="?android:attr/selectableItemBackgroundBorderless"
+                        android:contentDescription="上一首"
+                        android:src="@drawable/ic_prev"
+                        android:tint="@color/text_primary" />
+
+                    <ImageButton
+                        android:id="@+id/btnNowPlayPause"
+                        android:layout_width="64dp"
+                        android:layout_height="64dp"
+                        android:layout_marginHorizontal="16dp"
+                        android:background="@drawable/bg_circle_brand"
+                        android:contentDescription="播放/暂停"
+                        android:src="@drawable/ic_play"
+                        android:tint="@color/on_brand" />
+
+                    <ImageButton
+                        android:id="@+id/btnNowNext"
+                        android:layout_width="48dp"
+                        android:layout_height="48dp"
+                        android:background="?android:attr/selectableItemBackgroundBorderless"
+                        android:contentDescription="下一首"
+                        android:src="@drawable/ic_next"
+                        android:tint="@color/text_primary" />
+
+                    <Space
+                        android:layout_width="0dp"
+                        android:layout_height="1dp"
+                        android:layout_weight="1" />
+                </LinearLayout>
+
+                <!-- 次级行：队列 / 停止 -->
+                <LinearLayout
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:id="@+id/tvNowQueue"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:background="@drawable/bg_pill_ghost"
+                        android:paddingHorizontal="14dp"
+                        android:paddingVertical="6dp"
+                        android:text="队列(0)"
+                        android:textColor="@color/text_primary"
+                        android:textSize="13sp" />
+
+                    <ImageButton
+                        android:id="@+id/btnNowStop"
+                        android:layout_width="44dp"
+                        android:layout_height="44dp"
+                        android:layout_marginStart="8dp"
+                        android:background="?android:attr/selectableItemBackgroundBorderless"
+                        android:contentDescription="停止"
+                        android:src="@drawable/ic_stop"
+                        android:tint="@color/text_secondary" />
+                </LinearLayout>
+
+                <Space
+                    android:layout_width="1dp"
+                    android:layout_height="0dp"
+                    android:layout_weight="1" />
             </LinearLayout>
 
+            <!-- 空态（没有会话时整页提示） -->
             <TextView
-                android:id="@+id/tvNowQueue"
+                android:id="@+id/tvPlayEmpty"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginStart="6dp"
-                android:background="@drawable/bg_pill_ghost"
-                android:paddingHorizontal="10dp"
-                android:paddingVertical="5dp"
-                android:text="队列(0)"
-                android:textColor="@color/now_bar_text"
-                android:textSize="12sp" />
-        </LinearLayout>
-
-        <!-- 第二行：进度条 + 时间 -->
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
-            android:gravity="center_vertical"
-            android:orientation="horizontal">
-
-            <TextView
-                android:id="@+id/tvNowTime"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:minWidth="38dp"
+                android:layout_gravity="center"
                 android:gravity="center"
-                android:text="0:00"
-                android:textColor="@color/now_bar_subtext"
-                android:textSize="12sp" />
+                android:lineSpacingExtra="4dp"
+                android:text="@string/play_page_empty"
+                android:textColor="@color/text_faint"
+                android:textSize="14sp"
+                android:visibility="gone"
+                tools:visibility="visible" />
+        </FrameLayout>
+    </FrameLayout>
 
-            <SeekBar
-                android:id="@+id/seekNow"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:max="1000"
-                android:progressTint="@color/brand"
-                android:thumbTint="@color/brand" />
-
-            <TextView
-                android:id="@+id/tvNowDuration"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:minWidth="38dp"
-                android:gravity="center"
-                android:text="0:00"
-                android:textColor="@color/now_bar_subtext"
-                android:textSize="12sp" />
-        </LinearLayout>
-
-        <!-- 第三行：播放控制（主按钮品牌色圆形） -->
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="2dp"
-            android:gravity="center_vertical"
-            android:orientation="horizontal">
-
-            <Space
-                android:layout_width="0dp"
-                android:layout_height="1dp"
-                android:layout_weight="1" />
-
-            <ImageButton
-                android:id="@+id/btnNowPrev"
-                android:layout_width="44dp"
-                android:layout_height="44dp"
-                android:background="?android:attr/selectableItemBackgroundBorderless"
-                android:contentDescription="上一首"
-                android:src="@drawable/ic_prev"
-                android:tint="@color/now_bar_text" />
-
-            <ImageButton
-                android:id="@+id/btnNowPlayPause"
-                android:layout_width="56dp"
-                android:layout_height="56dp"
-                android:layout_marginHorizontal="10dp"
-                android:background="@drawable/bg_circle_brand"
-                android:contentDescription="播放/暂停"
-                android:src="@drawable/ic_play"
-                android:tint="@color/on_brand" />
-
-            <ImageButton
-                android:id="@+id/btnNowNext"
-                android:layout_width="44dp"
-                android:layout_height="44dp"
-                android:background="?android:attr/selectableItemBackgroundBorderless"
-                android:contentDescription="下一首"
-                android:src="@drawable/ic_next"
-                android:tint="@color/now_bar_text" />
-
-            <Space
-                android:layout_width="0dp"
-                android:layout_height="1dp"
-                android:layout_weight="1" />
-
-            <ImageButton
-                android:id="@+id/btnNowStop"
-                android:layout_width="40dp"
-                android:layout_height="40dp"
-                android:background="?android:attr/selectableItemBackgroundBorderless"
-                android:contentDescription="停止"
-                android:src="@drawable/ic_stop"
-                android:tint="@color/now_bar_subtext" />
-
-            <ImageButton
-                android:id="@+id/btnNowVolDown"
-                android:layout_width="40dp"
-                android:layout_height="40dp"
-                android:background="?android:attr/selectableItemBackgroundBorderless"
-                android:contentDescription="音量减小"
-                android:src="@drawable/ic_vol_down"
-                android:tint="@color/now_bar_subtext" />
-
-            <ImageButton
-                android:id="@+id/btnNowVolUp"
-                android:layout_width="40dp"
-                android:layout_height="40dp"
-                android:background="?android:attr/selectableItemBackgroundBorderless"
-                android:contentDescription="音量增大"
-                android:src="@drawable/ic_vol_up"
-                android:tint="@color/now_bar_subtext" />
-        </LinearLayout>
-    </LinearLayout>
-
-    <!-- ================= 设备区标题 + 清空 ================= -->
+    <!-- ============ 迷你播放条（跨页常驻，点击进播放页） ============ -->
     <LinearLayout
+        android:id="@+id/miniNowBar"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginStart="16dp"
-        android:layout_marginTop="16dp"
-        android:layout_marginEnd="16dp"
+        android:layout_marginHorizontal="10dp"
+        android:layout_marginTop="2dp"
+        android:layout_marginBottom="2dp"
+        android:background="@drawable/bg_row_card"
         android:gravity="center_vertical"
-        android:orientation="horizontal">
+        android:orientation="horizontal"
+        android:paddingHorizontal="10dp"
+        android:paddingVertical="6dp"
+        android:visibility="gone"
+        tools:visibility="visible">
 
-        <TextView
-            android:id="@+id/tvDeviceTitle"
+        <ImageView
+            android:id="@+id/miniArt"
+            android:layout_width="42dp"
+            android:layout_height="42dp"
+            android:background="@drawable/bg_art_round"
+            android:clipToOutline="true"
+            android:contentDescription="专辑封面"
+            android:outlineProvider="background"
+            android:scaleType="centerCrop"
+            android:visibility="gone"
+            tools:visibility="visible" />
+
+        <LinearLayout
             android:layout_width="0dp"
             android:layout_height="wrap_content"
+            android:layout_marginStart="10dp"
             android:layout_weight="1"
-            android:ellipsize="end"
-            android:maxLines="1"
-            android:text="@string/device_title"
-            android:textColor="@color/text_secondary"
-            android:textSize="13sp"
-            android:textStyle="bold" />
+            android:orientation="vertical">
 
-        <androidx.appcompat.widget.AppCompatButton
-            android:id="@+id/btnClear"
-            android:layout_width="wrap_content"
-            android:layout_height="32dp"
-            android:background="@drawable/bg_pill_ghost"
-            android:minWidth="0dp"
-            android:paddingStart="14dp"
-            android:paddingEnd="14dp"
-            android:stateListAnimator="@null"
-            android:text="@string/btn_clear"
-            android:textAllCaps="false"
-            android:textColor="@color/text_secondary"
-            android:textSize="12sp" />
+            <TextView
+                android:id="@+id/miniTitle"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:textColor="@color/text_primary"
+                android:textSize="14sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/miniMeta"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:textColor="@color/text_secondary"
+                android:textSize="11sp" />
+        </LinearLayout>
+
+        <ImageButton
+            android:id="@+id/btnMiniPlay"
+            android:layout_width="44dp"
+            android:layout_height="44dp"
+            android:background="?android:attr/selectableItemBackgroundBorderless"
+            android:contentDescription="播放/暂停"
+            android:src="@drawable/ic_play"
+            android:tint="@color/text_primary" />
+
+        <ImageButton
+            android:id="@+id/btnMiniNext"
+            android:layout_width="44dp"
+            android:layout_height="44dp"
+            android:background="?android:attr/selectableItemBackgroundBorderless"
+            android:contentDescription="下一首"
+            android:src="@drawable/ic_next"
+            android:tint="@color/text_primary" />
     </LinearLayout>
 
-    <!-- 首页常驻的"播放队列"入口（没在播放也能点进队列） -->
-    <TextView
-        android:id="@+id/tvQueueEntry"
+    <!-- ============ 底部导航 ============ -->
+    <com.google.android.material.bottomnavigation.BottomNavigationView
+        android:id="@+id/bottomNav"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginHorizontal="12dp"
-        android:layout_marginTop="10dp"
-        android:background="@drawable/bg_row_card"
-        android:drawableStart="@drawable/ic_queue"
-        android:drawablePadding="6dp"
-        android:drawableTint="@color/now_bar_text"
-        android:gravity="center_vertical"
-        android:paddingHorizontal="12dp"
-        android:paddingVertical="8dp"
-        android:text="播放队列"
-        android:textColor="@color/text_primary"
-        android:textSize="12sp"
-        android:visibility="gone"
-        tools:visibility="gone" />
-
-    <!-- ================= 设备列表（卡片行 + 空态文案） ================= -->
-    <FrameLayout
-        android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_marginHorizontal="12dp"
-        android:layout_marginTop="4dp"
-        android:layout_weight="1">
-
-        <ListView
-            android:id="@+id/listDevices"
-            android:layout_width="match_parent"
-            android:layout_height="match_parent"
-            android:clipToPadding="false"
-            android:divider="@null"
-            android:dividerHeight="0dp"
-            android:paddingBottom="8dp" />
-
-        <TextView
-            android:id="@+id/tvEmpty"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_gravity="center"
-            android:gravity="center"
-            android:lineSpacingExtra="4dp"
-            android:textColor="@color/text_faint"
-            android:textSize="14sp"
-            android:visibility="gone"
-            tools:visibility="visible"
-            tools:text="还没有发现设备\n点右上角「开始扫描」" />
-    </FrameLayout>
+        android:background="@color/card_bg"
+        app:itemIconTint="@color/nav_item_color"
+        app:itemTextColor="@color/nav_item_color"
+        app:labelVisibilityMode="labeled"
+        app:menu="@menu/bottom_nav_menu" />
 </LinearLayout>

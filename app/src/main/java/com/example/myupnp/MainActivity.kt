@@ -68,33 +68,54 @@ class MainActivity : AppCompatActivity() {
     private lateinit var btnStart: Button
     private lateinit var btnStop: Button
 
-    // ===== 第 7 课 A：底部"正在播放"控制条视图 =====
-    private lateinit var nowPlayingBar: View
+    // ===== 三页结构（播放 / 媒体库 / 设备）+ 底部导航 =====
+    private lateinit var pageDevices: View
+    private lateinit var pageLibrary: View
+    private lateinit var pagePlay: View
+    private lateinit var bottomNav: com.google.android.material.bottomnavigation.BottomNavigationView
+    private var lastTabBeforePlay = R.id.nav_devices
+    private var currentTabId = R.id.nav_devices
+
+    // ===== 正在播放：完整页 + 迷你条共用字段 =====
+    private lateinit var nowPlayingBar: View        // 播放页里的内容面板
+    private lateinit var tvPlayEmpty: TextView      // 播放页空态
+    private lateinit var miniNowBar: View           // 迷你播放条（跨页）
+    private lateinit var miniArt: android.widget.ImageView
+    private lateinit var miniTitle: TextView
+    private lateinit var miniMeta: TextView
+    private lateinit var btnMiniPlay: ImageButton
+    private lateinit var btnMiniNext: ImageButton
+    private lateinit var imgGlow: android.widget.ImageView // 播放页背景氛围
     private lateinit var tvNowDevice: TextView
     private lateinit var tvNowTitle: TextView
     private lateinit var btnNowPlayPause: ImageButton
     private lateinit var btnNowStop: ImageButton
-    private lateinit var btnNowVolDown: ImageButton
-    private lateinit var btnNowVolUp: ImageButton
     private lateinit var seekNow: android.widget.SeekBar
+    private lateinit var seekVol: android.widget.SeekBar
+    private lateinit var volRow: View
     private lateinit var tvNowTime: TextView
     private lateinit var tvNowDuration: TextView
     private lateinit var tvNowVolume: TextView
-
-    // ===== 第 7 课 B：播放队列控件（上一首/下一首 + 队列入口） =====
     private lateinit var btnNowPrev: ImageButton
     private lateinit var btnNowNext: ImageButton
     private lateinit var tvNowQueue: TextView
     private lateinit var tvQueueEntry: TextView
     private lateinit var tvEmpty: TextView
-
-    // ===== 第 7 课 C：封面缩略图 + 歌手/专辑小字 =====
     private lateinit var imgNowArt: android.widget.ImageView
     private lateinit var tvNowMeta: TextView
     private var lastArtUrl: String? = null // 已加载封面的地址（避免重复下载）
 
-    /** 用户正在拖动进度条（避免 ticker 抢进度） */
+    // ===== 媒体库页（媒体服务器列表） =====
+    private lateinit var listLibrary: ListView
+    private lateinit var tvLibEmpty: TextView
+    private val libraryServers = ArrayList<Pair<Entry, com.example.myupnp.model.UpnpService>>()
+
+    /** 用户正在拖动进度条 / 音量滑杆（避免 ticker/事件回写抢进度） */
     private var seekDragging = false
+    private var volDragging = false
+
+    /** 媒体库页服务器列表的 adapter */
+    private lateinit var libraryAdapter: android.widget.BaseAdapter
 
     // ===== MVVM：对象与线程池全部归 ViewModel，Activity 只引用 =====
     private val mainHandler: Handler get() = vm.mainHandler
@@ -220,15 +241,27 @@ class MainActivity : AppCompatActivity() {
             vm.clearAllDevices()
         }
 
-        // ===== 第 7 课 A：底部"正在播放"控制条 =====
+        // ===== 三页 + 底部导航 + 播放页/迷你条 视图 =====
+        pageDevices = findViewById(R.id.pageDevices)
+        pageLibrary = findViewById(R.id.pageLibrary)
+        pagePlay = findViewById(R.id.pagePlay)
+        bottomNav = findViewById(R.id.bottomNav)
         nowPlayingBar = findViewById(R.id.nowPlayingBar)
+        tvPlayEmpty = findViewById(R.id.tvPlayEmpty)
+        miniNowBar = findViewById(R.id.miniNowBar)
+        miniArt = findViewById(R.id.miniArt)
+        miniTitle = findViewById(R.id.miniTitle)
+        miniMeta = findViewById(R.id.miniMeta)
+        btnMiniPlay = findViewById(R.id.btnMiniPlay)
+        btnMiniNext = findViewById(R.id.btnMiniNext)
+        imgGlow = findViewById(R.id.imgGlow)
         tvNowDevice = findViewById(R.id.tvNowDevice)
         tvNowTitle = findViewById(R.id.tvNowTitle)
         btnNowPlayPause = findViewById(R.id.btnNowPlayPause)
         btnNowStop = findViewById(R.id.btnNowStop)
-        btnNowVolDown = findViewById(R.id.btnNowVolDown)
-        btnNowVolUp = findViewById(R.id.btnNowVolUp)
         seekNow = findViewById(R.id.seekNow)
+        seekVol = findViewById(R.id.seekVol)
+        volRow = findViewById(R.id.volRow)
         tvNowTime = findViewById(R.id.tvNowTime)
         tvNowDuration = findViewById(R.id.tvNowDuration)
         tvNowVolume = findViewById(R.id.tvNowVolume)
@@ -237,17 +270,56 @@ class MainActivity : AppCompatActivity() {
         tvNowQueue = findViewById(R.id.tvNowQueue)
         imgNowArt = findViewById(R.id.imgNowArt)
         tvNowMeta = findViewById(R.id.tvNowMeta)
+        listLibrary = findViewById(R.id.listLibrary)
+        tvLibEmpty = findViewById(R.id.tvLibEmpty)
 
+        // 播放/暂停、停止
         btnNowPlayPause.setOnClickListener { togglePlayPause() }
         btnNowStop.setOnClickListener { stopNowPlaying() }
-        btnNowVolDown.setOnClickListener { volumeStepNow(-10) }
-        btnNowVolUp.setOnClickListener { volumeStepNow(10) }
-        // 第 7 课 B：播放队列
+        btnMiniPlay.setOnClickListener { togglePlayPause() }
+        btnMiniNext.setOnClickListener { vm.queueNextItem() }
+        // 切歌
         btnNowPrev.setOnClickListener { vm.queuePreviousItem() }
         btnNowNext.setOnClickListener { vm.queueNextItem() }
+        // 队列
         tvNowQueue.setOnClickListener { showQueueDialog() }
-        // 首页常驻队列入口（没在播放也能点开队列）
         tvQueueEntry.setOnClickListener { showQueueDialog() }
+        // 迷你条（非按钮区域）点击 -> 打开播放页
+        miniNowBar.setOnClickListener { switchTab(R.id.nav_playing) }
+
+        // 播放页下滑收起（回上一 Tab）
+        var swipeX = 0f
+        var swipeY = 0f
+        pagePlay.setOnTouchListener { _, e ->
+            when (e.actionMasked) {
+                android.view.MotionEvent.ACTION_DOWN -> {
+                    swipeX = e.x
+                    swipeY = e.y
+                }
+                android.view.MotionEvent.ACTION_UP -> {
+                    if (e.y - swipeY > 160 && kotlin.math.abs(e.x - swipeX) < 140) {
+                        switchTab(lastTabBeforePlay)
+                    }
+                }
+            }
+            false
+        }
+
+        // 音量滑杆：拖动实时更新数字，松手发 SetVolume
+        seekVol.setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(bar: android.widget.SeekBar?, progress: Int, fromUser: Boolean) {
+                if (fromUser) tvNowVolume.text = progress.toString()
+            }
+
+            override fun onStartTrackingTouch(bar: android.widget.SeekBar?) {
+                volDragging = true
+            }
+
+            override fun onStopTrackingTouch(bar: android.widget.SeekBar?) {
+                volDragging = false
+                bar?.progress?.let { sendVolume(it) }
+            }
+        })
 
         // 进度条：拖动中不更新（ticker 停手），松手发 Seek
         seekNow.setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
@@ -270,6 +342,46 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         })
+
+        // 媒体库页：服务器列表（两行卡片），点开曲库浏览
+        libraryAdapter = object : android.widget.BaseAdapter() {
+            override fun getCount(): Int = libraryServers.size
+            override fun getItem(p: Int): Any = libraryServers[p]
+            override fun getItemId(p: Int): Long = p.toLong()
+            override fun getView(p: Int, convert: View?, parent: ViewGroup): View {
+                val view = convert
+                    ?: layoutInflater.inflate(R.layout.item_device, parent, false)
+                val (entry, _) = libraryServers[p]
+                val device = entry.device
+                view.findViewById<TextView>(R.id.tvDeviceName).text =
+                    if (vm.isFavoriteEntry(entry)) "⭐ ${vm.shownNameOf(entry)}"
+                    else vm.shownNameOf(entry)
+                view.findViewById<TextView>(R.id.tvDeviceSub).text = buildString {
+                    append("媒体服务器")
+                    device?.modelName?.takeIf { it.isNotBlank() }?.let { append(" · $it") }
+                    if (entry.ip.isNotBlank()) append(" · ${entry.ip}")
+                }
+                return view
+            }
+        }
+        listLibrary.adapter = libraryAdapter
+        listLibrary.setOnItemClickListener { _, _, p, _ ->
+            val cds = libraryServers.getOrNull(p)?.second ?: return@setOnItemClickListener
+            showMediaBrowser(cds)
+        }
+        listLibrary.setOnItemLongClickListener { _, _, p, _ ->
+            val entry = libraryServers.getOrNull(p)?.first ?: return@setOnItemLongClickListener false
+            showDeviceInfoDialog(entry)
+            true
+        }
+
+        // 底部导航切换页面（同一 Tab 重复点击忽略）
+        bottomNav.setOnItemSelectedListener { item ->
+            if (item.itemId != currentTabId) applyTab(item.itemId)
+            true
+        }
+        refreshLibraryRows() // 提前准备好媒体服务器列表
+        showPage(pageDevices)
 
         // ===== MVVM：UI 观察 ViewModel 状态（第 1+2 批） =====
         // 通用 UI 状态：扫描按钮/状态栏/计数/正在播放控制条
@@ -308,19 +420,28 @@ class MainActivity : AppCompatActivity() {
                 } else {
                     tvQueueEntry.visibility = View.GONE
                 }
-                // 正在播放控制条
+                // 正在播放：迷你条 + 播放页内容 同步渲染
+                val meta = listOf(s.nowPlayingArtist, s.nowPlayingAlbum)
+                    .filter { it.isNotBlank() }
+                    .joinToString(" · ")
                 if (s.nowPlayingActive) {
                     nowPlayingBar.visibility = View.VISIBLE
-                    tvNowDevice.text = s.nowPlayingDevice
-                    tvNowTitle.text = s.nowPlayingTitle
+                    tvPlayEmpty.visibility = View.GONE
+                    miniNowBar.visibility = View.VISIBLE
+
+                    val playing = s.nowPlayingPlaying
                     btnNowPlayPause.setImageResource(
-                        if (s.nowPlayingPlaying) R.drawable.ic_pause else R.drawable.ic_play
+                        if (playing) R.drawable.ic_pause else R.drawable.ic_play
                     )
-                    btnNowVolDown.isEnabled = s.nowPlayingHasRc
-                    btnNowVolUp.isEnabled = s.nowPlayingHasRc
-                    val volAlpha = if (s.nowPlayingHasRc) 1.0f else 0.3f
-                    btnNowVolDown.alpha = volAlpha
-                    btnNowVolUp.alpha = volAlpha
+                    btnMiniPlay.setImageResource(
+                        if (playing) R.drawable.ic_pause else R.drawable.ic_play
+                    )
+
+                    tvNowDevice.text = "正在播放到：${s.nowPlayingDevice}"
+                    tvNowTitle.text = s.nowPlayingTitle
+                    miniTitle.text = s.nowPlayingTitle
+                    miniMeta.text = if (meta.isNotEmpty()) meta else s.nowPlayingDevice
+
                     // 进度：不拖动时才跟随状态，避免与用户拖拽打架
                     if (!seekDragging) {
                         val dur = if (s.durationSec > 0) s.durationSec else 1
@@ -329,22 +450,26 @@ class MainActivity : AppCompatActivity() {
                     }
                     tvNowTime.text = fmtDuration(s.positionSec)
                     tvNowDuration.text = fmtDuration(s.durationSec)
-                    seekNow.isEnabled = s.seekable && !s.nowPlayingDevice.isEmpty()
-                    // 音量显示（未知显示 --）
-                    tvNowVolume.text = s.volume?.toString() ?: "--"
-                    tvNowVolume.visibility = if (s.nowPlayingHasRc) View.VISIBLE else View.GONE
-                    // 播放队列：待播几首显示在入口上
+                    seekNow.isEnabled = s.seekable && s.nowPlayingDevice.isNotEmpty()
+
+                    // 音量：滑杆 + 数字（有 RenderingControl 才显示整行）
+                    val hasRc = s.nowPlayingHasRc
+                    volRow.visibility = if (hasRc) View.VISIBLE else View.GONE
+                    if (hasRc) {
+                        tvNowVolume.text = s.volume?.toString() ?: "--"
+                        if (!volDragging && s.volume != null) seekVol.progress = s.volume ?: 0
+                    }
+
+                    // 队列 / 元数据 / 封面
                     tvNowQueue.text = "队列(${s.queuePendingCount})"
-                    // 第 7 课 C：歌手 · 专辑 小字
-                    val meta = listOf(s.nowPlayingArtist, s.nowPlayingAlbum)
-                        .filter { it.isNotBlank() }
-                        .joinToString(" · ")
                     tvNowMeta.text = meta
                     tvNowMeta.visibility = if (meta.isEmpty()) View.GONE else View.VISIBLE
-                    // 第 7 课 C：专辑封面（异步下载，切歌防串图）
                     loadArtwork(s.nowPlayingArtUrl)
                 } else {
                     nowPlayingBar.visibility = View.GONE
+                    miniNowBar.visibility = View.GONE
+                    tvPlayEmpty.visibility = View.VISIBLE
+                    imgGlow.visibility = View.GONE
                 }
             }
         }
@@ -354,6 +479,7 @@ class MainActivity : AppCompatActivity() {
                 deviceItems.clear()
                 deviceItems.addAll(rows)
                 adapter.notifyDataSetChanged()
+                refreshLibraryRows() // 媒体库页的服务器列表跟着设备表刷新
             }
         }
         // 一次性消息（订阅/退订等提示）
@@ -797,19 +923,81 @@ class MainActivity : AppCompatActivity() {
     }
 
     // ------------------------------------------------------------------
+    // 三页切换 / 媒体库 / 音量（页面层工具）
+    // ------------------------------------------------------------------
+
+    /** 切 Tab（迷你条点击/下滑收起用） */
+    private fun switchTab(itemId: Int) {
+        if (bottomNav.selectedItemId != itemId) bottomNav.selectedItemId = itemId
+    }
+
+    /** 真正应用某个 Tab */
+    private fun applyTab(itemId: Int) {
+        val previous = currentTabId
+        currentTabId = itemId
+        if (itemId == R.id.nav_playing && previous != R.id.nav_playing) {
+            lastTabBeforePlay = previous
+        }
+        when (itemId) {
+            R.id.nav_playing -> showPage(pagePlay)
+            R.id.nav_library -> {
+                refreshLibraryRows()
+                showPage(pageLibrary)
+            }
+            else -> showPage(pageDevices)
+        }
+    }
+
+    /** 显示指定页（三页互斥） */
+    private fun showPage(target: View) {
+        pagePlay.visibility = if (target === pagePlay) View.VISIBLE else View.GONE
+        pageLibrary.visibility = if (target === pageLibrary) View.VISIBLE else View.GONE
+        pageDevices.visibility = if (target === pageDevices) View.VISIBLE else View.GONE
+    }
+
+    /** 刷新媒体库页的服务器列表（MediaServer + ContentDirectory） */
+    private fun refreshLibraryRows() {
+        libraryServers.clear()
+        for (e in vm.deviceEntriesFavoritesFirst()) {
+            val d = e.device ?: continue
+            val cds = d.services.firstOrNull { it.serviceType.contains("ContentDirectory") } ?: continue
+            libraryServers.add(e to cds)
+        }
+        libraryServers.sortByDescending { vm.isFavoriteEntry(it.first) }
+        if (::libraryAdapter.isInitialized) {
+            libraryAdapter.notifyDataSetChanged()
+            tvLibEmpty.visibility = if (libraryServers.isEmpty()) View.VISIBLE else View.GONE
+        }
+    }
+
+    /** 音量滑杆松手：把音量设到目标值（乐观更新 + 后台 SetVolume） */
+    private fun sendVolume(target: Int) {
+        val np = nowSession.current ?: return
+        val rc = np.rc ?: return
+        nowSession.syncVolume(target.coerceIn(0, 100))
+        controlExecutor.execute {
+            DlnaPlayer.setVolume(rc, target.coerceIn(0, 100))
+        }
+    }
+
+    // ------------------------------------------------------------------
     // 第 7 课 C：专辑封面下载（后台线程；失败或切歌时安全隐藏）
     // ------------------------------------------------------------------
 
-    /** 封面加载：只应用"还是当前这首歌"的结果，防止切歌时串图 */
+    /** 封面加载：同一张封面喂给 播放页大封面 / 迷你条 / 背景氛围；切歌防串图 */
     private fun loadArtwork(url: String) {
         if (url.isBlank()) {
             lastArtUrl = null
             imgNowArt.visibility = View.GONE
+            miniArt.visibility = View.GONE
+            imgGlow.visibility = View.GONE
             return
         }
         if (url == lastArtUrl) return // 已处理过（成功/失败都记，避免反复请求）
         lastArtUrl = url
         imgNowArt.visibility = View.GONE // 先隐藏，加载成功再亮
+        miniArt.visibility = View.GONE
+        imgGlow.visibility = View.GONE
         fetchExecutor.execute {
             val bytes = runCatching { downloadWithLimit(url, MAX_ART_BYTES) }.getOrNull()
             val bitmap = bytes?.let { decodeScaled(it, ART_TARGET_PX) }
@@ -818,8 +1006,14 @@ class MainActivity : AppCompatActivity() {
                     if (bitmap != null) {
                         imgNowArt.setImageBitmap(bitmap)
                         imgNowArt.visibility = View.VISIBLE
+                        miniArt.setImageBitmap(bitmap)
+                        miniArt.visibility = View.VISIBLE
+                        imgGlow.setImageBitmap(bitmap)
+                        imgGlow.visibility = View.VISIBLE
                     } else {
                         imgNowArt.visibility = View.GONE
+                        miniArt.visibility = View.GONE
+                        imgGlow.visibility = View.GONE
                     }
                 }
             }
