@@ -8,9 +8,11 @@ import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkRequest
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
+import android.provider.OpenableColumns
 import android.util.Log
 import android.view.View
 import android.view.ViewGroup
@@ -99,6 +101,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var tvNowQueue: TextView
     private lateinit var tvQueueEntry: TextView
     private lateinit var tvRecentEntry: TextView
+    private lateinit var tvLocalPush: TextView
     private lateinit var imgNowArt: android.widget.ImageView
     private lateinit var tvNowMeta: TextView
     private var lastArtUrl: String? = null // 已加载封面的地址（避免重复下载）
@@ -177,6 +180,12 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+    // 第 7 课 B：选手机里的本地媒体文件
+    private val localFileLauncher =
+        registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+            uri?.let { pushLocalMedia(it) }
+        }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -190,6 +199,7 @@ class MainActivity : AppCompatActivity() {
         tvStatus = findViewById(R.id.tvStatus)
         tvQueueEntry = findViewById(R.id.tvQueueEntry)
         tvRecentEntry = findViewById(R.id.tvRecentEntry)
+        tvLocalPush = findViewById(R.id.tvLocalPush)
         btnStart = findViewById(R.id.btnStart)
         btnStop = findViewById(R.id.btnStop)
 
@@ -252,6 +262,10 @@ class MainActivity : AppCompatActivity() {
         tvQueueEntry.setOnClickListener { showQueueDialog() }
         // 最近播放（第 7 课 D）
         tvRecentEntry.setOnClickListener { showHistoryDialog() }
+        // 本地文件推送（第 7 课 B）
+        tvLocalPush.setOnClickListener {
+            localFileLauncher.launch(arrayOf("audio/*", "video/*", "image/*"))
+        }
         // 迷你条（非按钮区域）点击 -> 打开播放页
         miniNowBar.setOnClickListener { switchTab(R.id.nav_playing) }
 
@@ -845,6 +859,37 @@ class MainActivity : AppCompatActivity() {
                 artUrl = e.artUrl
             )
         )
+    }
+
+    // ------------------------------------------------------------------
+    // 第 7 课 B：本地文件推送
+    // ------------------------------------------------------------------
+
+    /** 选了本地文件：起手机端 HTTP 服务 -> 走"选设备播放"推给音箱/电视 */
+    private fun pushLocalMedia(uri: Uri) {
+        val name = queryLocalFileName(uri)
+        Toast.makeText(this, "正在准备本地文件…", Toast.LENGTH_SHORT).show()
+        vm.serveLocalFile(uri, name) { url, err ->
+            if (url == null) {
+                Toast.makeText(this, err ?: "本地文件推送失败", Toast.LENGTH_LONG).show()
+                return@serveLocalFile
+            }
+            val title = name.substringBeforeLast('.').ifBlank { name }
+            playMediaItemFromServer(
+                MediaItem(id = url, title = title, resUrl = url)
+            )
+        }
+    }
+
+    /** 从 content:// 上查文件名（拿不到就退回路径最后一段） */
+    private fun queryLocalFileName(uri: Uri): String {
+        val fromQuery = runCatching {
+            contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
+                ?.use { c -> if (c.moveToFirst()) c.getString(0) else null }
+        }.getOrNull()
+        return fromQuery?.takeIf { it.isNotBlank() }
+            ?: uri.lastPathSegment?.takeIf { it.isNotBlank() }
+            ?: "本地媒体"
     }
 
     /** 队列总览与管理：单击待播=立即切；长按待播=删除/上移/下移 */

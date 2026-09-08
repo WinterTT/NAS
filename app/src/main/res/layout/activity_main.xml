@@ -94,6 +94,24 @@
                 android:textColor="@color/text_faint"
                 android:textSize="12sp" />
 
+            <!-- 本地文件推送入口（第 7 课 B） -->
+            <TextView
+                android:id="@+id/tvLocalPush"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginHorizontal="12dp"
+                android:layout_marginTop="10dp"
+                android:background="@drawable/bg_row_card"
+                android:drawableStart="@drawable/ic_local"
+                android:drawablePadding="6dp"
+                android:drawableTint="@color/text_secondary"
+                android:gravity="center_vertical"
+                android:paddingHorizontal="12dp"
+                android:paddingVertical="8dp"
+                android:text="推本地文件（手机里的音乐 / 视频）"
+                android:textColor="@color/text_primary"
+                android:textSize="12sp" />
+
             <!-- 播放队列入口（没在播放也能点开队列） -->
             <TextView
                 android:id="@+id/tvQueueEntry"

@@ -4,6 +4,7 @@ import android.app.Application
 import android.content.Context
 import android.net.ConnectivityManager
 import android.net.Network
+import android.net.Uri
 import android.net.wifi.WifiManager
 import android.os.Handler
 import android.os.Looper
@@ -194,6 +195,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             Log.d(TAG, "[EVENT-SERVER] $info")
         }
     })
+
+    /** 本地文件 HTTP 服务（第 7 课 B：把手机里的媒体推给音箱/电视） */
+    val fileServer = LocalFileServer(getApplication())
 
     private var multicastLock: WifiManager.MulticastLock? = null
 
@@ -909,6 +913,33 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     // ------------------------------------------------------------------
+    // 第 7 课 B：本地文件推送（手机起 HTTP 服务供渲染器拉流）
+    // ------------------------------------------------------------------
+
+    /**
+     * 启动本地文件 HTTP 服务并返回可推给渲染器的 URL。
+     * 后台启动，结果经主线程回调。
+     * @param uri  用户选中的本地文件（content://）
+     * @param name 文件名（用于 Content-Type 与 URL）
+     */
+    fun serveLocalFile(uri: Uri, name: String, onDone: (url: String?, error: String?) -> Unit) {
+        fetchExecutor.execute {
+            val started = fileServer.start()
+            fileServer.setCurrent(uri, name)
+            val ip = LocalIp.ipv4()
+            val url = if (started && ip != null && fileServer.port > 0) {
+                "http://$ip:${fileServer.port}/" + Uri.encode(name)
+            } else {
+                null
+            }
+            mainHandler.post {
+                if (url != null) onDone(url, null)
+                else onDone(null, "本地文件服务启动失败：请确认已连 Wi-Fi")
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------
     // 第 7 课 E：设备收藏 / 别名（持久化到 DeviceBookmarks）
     // ------------------------------------------------------------------
 
@@ -1016,6 +1047,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         multicastLock = null
         subManager.unsubscribeAll()
         eventServer.stop()
+        fileServer.stop()
     }
 
     override fun onCleared() {
@@ -1025,6 +1057,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         multicastLock = null
         subManager.unsubscribeAll()
         eventServer.stop()
+        fileServer.stop()
         mainHandler.removeCallbacksAndMessages(null)
         fetchExecutor.shutdownNow()
         controlExecutor.shutdownNow()
