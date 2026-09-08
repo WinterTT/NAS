@@ -17,6 +17,7 @@ import com.example.myupnp.gena.EventProperties
 import com.example.myupnp.gena.GenaClient
 import com.example.myupnp.gena.LocalEventServer
 import com.example.myupnp.gena.LocalIp
+import com.example.myupnp.model.UpnpService
 import com.example.myupnp.ssdp.SsdpDiscovery
 import com.example.myupnp.ssdp.SsdpMessage
 import kotlinx.coroutines.Job
@@ -92,6 +93,39 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             override fun onError(message: String) = postMessage(message, isError = true)
         }
     )
+
+    /**
+     * 活动设备自动订阅：播放/操作某台设备成功后调用。
+     * 自动订阅该设备"全部服务"，此后其它 Client 对该设备的操作
+     * （进度/音量等）都会经 GENA 推送同步到我们。
+     * 切换到另一台设备时，自动退订旧设备的订阅再订新的。
+     *
+     * @param key       设备唯一键（用 Entry.location / UDN 均可，用于判断"换设备了"）
+     * @param services  该设备描述里的全部服务
+     */
+    private var activeDeviceKey: String? = null
+
+    fun activateDeviceSubscription(key: String, services: List<UpnpService>) {
+        if (key == activeDeviceKey) return // 同一台设备，别重复折腾
+        deactivateDeviceSubscription()     // 切设备：先退旧的（所有）
+        activeDeviceKey = key
+        val cb = eventCallbackUrl ?: return
+        Log.i(TAG, "[SUB] 活动设备自动订阅: $key（${services.size} 个服务）")
+        for (svc in services) {
+            if (svc.eventSubUrl.isNotBlank() && !subManager.isSubscribed(svc.eventSubUrl)) {
+                subManager.subscribe(svc, cb)
+            }
+        }
+    }
+
+    /** 结束活动设备订阅（会话结束/退出时调用） */
+    fun deactivateDeviceSubscription() {
+        if (activeDeviceKey != null) {
+            Log.i(TAG, "[SUB] 退订活动设备: $activeDeviceKey")
+        }
+        activeDeviceKey = null
+        subManager.unsubscribeAll()
+    }
 
     // ------------------------------------------------------------------
     // 播放进度 ticker：常驻轻量循环，播放中每秒推进一次本地进度
@@ -196,6 +230,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     /** 清空设备列表（顶部"清空设备"按钮） */
     fun clearAllDevices() {
+        deactivateDeviceSubscription()
         registry.clearAll()
         clearNowPlayingIfDeviceGone()
     }

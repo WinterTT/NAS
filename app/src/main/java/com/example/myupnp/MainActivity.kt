@@ -345,7 +345,13 @@ class MainActivity : AppCompatActivity() {
                     )
                 ) { _, which ->
                     when (which) {
-                        0 -> showPlayerPanel(device.friendlyName.ifEmpty { "播放器" }, renderer, rc)
+                        0 -> showPlayerPanel(
+                            deviceName = device.friendlyName.ifEmpty { "播放器" },
+                            renderer = renderer,
+                            rc = rc,
+                            device = device,
+                            deviceKey = entry.location
+                        )
                         1 -> showServicePicker(entry, device)
                     }
                 }
@@ -473,10 +479,12 @@ class MainActivity : AppCompatActivity() {
         if (renderers.size == 1) {
             val e = renderers[0].first
             pushToRenderer(
-                renderers[0].second,
-                e.device!!.friendlyName,
-                e.device!!.let { DlnaPlayer.renderingControlOf(it) },
-                item
+                renderer = renderers[0].second,
+                deviceName = e.device!!.friendlyName,
+                rc = e.device!!.let { DlnaPlayer.renderingControlOf(it) },
+                item = item,
+                device = e.device!!,
+                deviceKey = e.location
             )
             return
         }
@@ -489,19 +497,27 @@ class MainActivity : AppCompatActivity() {
             .setTitle("推送给哪台设备播放？")
             .setItems(names.toTypedArray()) { _, which ->
                 val (e, avt) = renderers[which]
-                pushToRenderer(avt, e.device!!.friendlyName,
-                    e.device!!.let { DlnaPlayer.renderingControlOf(it) }, item)
+                pushToRenderer(
+                    renderer = avt,
+                    deviceName = e.device!!.friendlyName,
+                    rc = e.device!!.let { DlnaPlayer.renderingControlOf(it) },
+                    item = item,
+                    device = e.device!!,
+                    deviceKey = e.location
+                )
             }
             .setNegativeButton("取消", null)
             .show()
     }
 
-    /** 真正推送一首歌到指定播放器（含日志、结果、自动订阅状态 + 显示控制条） */
+    /** 真正推送一首歌到指定播放器（含日志、结果、自动订阅 + 显示控制条） */
     private fun pushToRenderer(
         renderer: UpnpService,
         deviceName: String,
         rc: UpnpService?,
-        item: MediaItem
+        item: MediaItem,
+        device: UpnpDevice,
+        deviceKey: String
     ) {
         val targetName = deviceName.ifEmpty { "播放器" }
         appendLog("▶ 从曲库推送 ${item.title} → $targetName\n   地址: ${item.resUrl}")
@@ -519,7 +535,8 @@ class MainActivity : AppCompatActivity() {
                 mainHandler.post {
                     setNowPlaying(deviceName, renderer, rc, item.title)
                     Toast.makeText(this, "已推送给 $targetName 播放", Toast.LENGTH_SHORT).show()
-                    if (!subManager.isSubscribed(renderer.eventSubUrl)) subscribeService(renderer)
+                    // 操作了这台设备 -> 自动订阅其全部服务（之后别处操作也能同步）
+                    vm.activateDeviceSubscription(deviceKey, device.services)
                 }
             }
         }
@@ -573,7 +590,13 @@ class MainActivity : AppCompatActivity() {
      * 播放器面板：输入一个媒体 URL，就能让电视/音箱播起来。
      * 全流程复用前三课：SOAP 控制(SetAVTransportURI/Play/音量) + GENA 订阅(看进度)。
      */
-    private fun showPlayerPanel(deviceName: String, renderer: UpnpService, rc: UpnpService?) {
+    private fun showPlayerPanel(
+        deviceName: String,
+        renderer: UpnpService,
+        rc: UpnpService?,
+        device: UpnpDevice,
+        deviceKey: String
+    ) {
         // ---- 构建面板视图（课程演示用，简化为一个输入框 + 按钮行） ----
         val urlInput = EditText(this).apply {
             hint = "媒体 URL，如 http://192.168.1.50/video.mp4"
@@ -625,7 +648,7 @@ class MainActivity : AppCompatActivity() {
                         )
                     }
                 }
-                // 推送成功后订阅进度事件，日志里就能看到播放状态变化
+                // 推送成功后：建立播放会话 + 自动订阅该设备全部服务
                 if (results.lastOrNull()?.second?.success == true) {
                     mainHandler.post {
                         setNowPlaying(
@@ -634,10 +657,7 @@ class MainActivity : AppCompatActivity() {
                             rc = rc,
                             title = url.substringAfterLast('/').ifEmpty { url }
                         )
-                        if (!subManager.isSubscribed(renderer.eventSubUrl)) {
-                            Toast.makeText(this, "已订阅播放状态", Toast.LENGTH_SHORT).show()
-                            subscribeService(renderer)
-                        }
+                        vm.activateDeviceSubscription(deviceKey, device.services)
                     }
                 }
             }
