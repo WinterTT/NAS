@@ -427,7 +427,7 @@ class MainActivity : AppCompatActivity() {
                 if (s.nowPlayingActive) {
                     nowPlayingBar.visibility = View.VISIBLE
                     tvPlayEmpty.visibility = View.GONE
-                    miniNowBar.visibility = View.VISIBLE
+                    refreshMiniBar()
 
                     val playing = s.nowPlayingPlaying
                     btnNowPlayPause.setImageResource(
@@ -946,6 +946,7 @@ class MainActivity : AppCompatActivity() {
             }
             else -> showPage(pageDevices)
         }
+        refreshMiniBar()
     }
 
     /** 显示指定页（三页互斥） */
@@ -953,6 +954,12 @@ class MainActivity : AppCompatActivity() {
         pagePlay.visibility = if (target === pagePlay) View.VISIBLE else View.GONE
         pageLibrary.visibility = if (target === pageLibrary) View.VISIBLE else View.GONE
         pageDevices.visibility = if (target === pageDevices) View.VISIBLE else View.GONE
+    }
+
+    /** 迷你条只在「有在播 且 不在播放页」时显示（播放页里它多余） */
+    private fun refreshMiniBar() {
+        val show = vm.uiState.value.nowPlayingActive && currentTabId != R.id.nav_playing
+        miniNowBar.visibility = if (show) View.VISIBLE else View.GONE
     }
 
     /** 刷新媒体库页的服务器列表（MediaServer + ContentDirectory） */
