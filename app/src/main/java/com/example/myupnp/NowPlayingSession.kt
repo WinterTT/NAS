@@ -43,6 +43,11 @@ class NowPlayingSession(
         val title: String,
         /** 设备在注册表里的 key（=LOCATION），用于"记忆恢复"时重新定位 */
         val deviceKey: String? = null,
+        // ---- 第 7 课 C：曲目元数据（浏览曲库时就有，推送时带过来） ----
+        val artist: String = "",
+        val album: String = "",
+        /** 专辑封面地址（已绝对化）；空 = 没有 */
+        val artUrl: String = "",
         var playing: Boolean = false,
         // ---- 进度（秒），由 GENA 事件校准，本地 tick 推进 ----
         var positionSec: Long = 0L,
@@ -83,7 +88,10 @@ class NowPlayingSession(
         rc: UpnpService?,
         title: String,
         deviceKey: String? = null,
-        playing: Boolean = true
+        playing: Boolean = true,
+        artist: String = "",
+        album: String = "",
+        artUrl: String = ""
     ) {
         session = NowPlaying(
             deviceName = deviceName,
@@ -91,6 +99,9 @@ class NowPlayingSession(
             rc = rc,
             title = title,
             deviceKey = deviceKey,
+            artist = artist,
+            album = album,
+            artUrl = artUrl,
             playing = playing
         )
         Log.i(TAG, "[NOW] 播放会话: $title @ $deviceName")

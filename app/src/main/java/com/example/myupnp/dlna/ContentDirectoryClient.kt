@@ -81,7 +81,7 @@ object ContentDirectoryClient {
                 rawSnippet = result.body.take(600)
             )
         }
-        return BrowseResult(objects = parseResult(didl))
+        return BrowseResult(objects = parseResult(didl, service.controlUrl))
     }
 
     // ------------------------------------------------------------------
@@ -119,18 +119,9 @@ object ContentDirectoryClient {
 
     /**
      * 把 Result 里的一段 DIDL-Lite 解析成 MediaObject 列表。
-     * DIDL-Lite 结构（扁平一层）：
-     *   <container id="2" parentID="0" restricted="1">
-     *     <dc:title>流行</dc:title>
-     *     <upnp:class>object.container.storageFolder</upnp:class>
-     *   </container>
-     *   <item id="12" parentID="2" restricted="1">
-     *     <dc:title>晴天.mp3</dc:title>
-     *     <upnp:class>object.item.audioItem.musicTrack</upnp:class>
-     *     <res protocolInfo="http-get:*:audio/mpeg:...">http://ip:port/file.mp3</res>
-     *   </item>
+     * @param baseUrl ContentDirectory 的 controlUrl：用于把 albumArtURI 相对路径转绝对
      */
-    internal fun parseResult(didl: String): List<MediaObject> {
+    internal fun parseResult(didl: String, baseUrl: String = ""): List<MediaObject> {
         val result = ArrayList<MediaObject>()
 
         // 容器（可能带命名空间前缀，如 <container> 或 <DIDL-Lite:container>）
@@ -166,11 +157,43 @@ object ContentDirectoryClient {
                     title = extractTitle(inner),
                     upnpClass = extractElementText(inner, "class"),
                     resUrl = res.first,
-                    mime = res.second
+                    mime = res.second,
+                    // 第 7 课 C：歌手/专辑/封面（有的设备用 dc:creator 当歌手）
+                    artist = extractArtist(inner),
+                    album = extractElementText(inner, "album"),
+                    artUrl = absoluteUrl(
+                        raw = extractElementText(inner, "albumArtURI"),
+                        base = baseUrl
+                    )
                 )
             )
         }
         return result
+    }
+
+    /** 歌手：upnp:artist 优先，没有就退回 dc:creator（个别设备命名习惯） */
+    private fun extractArtist(inner: String): String {
+        val artist = extractElementText(inner, "artist")
+        if (artist.isNotEmpty()) return artist
+        val creator = Regex(
+            "<(?:[\\w.]+:)?creator\\b[^>]*>(.*?)</(?:[\\w.]+:)?creator>",
+            RegexOption.DOT_MATCHES_ALL
+        ).find(inner)
+        return creator?.groupValues?.get(1)?.trim().orEmpty()
+    }
+
+    /**
+     * 相对地址转绝对：很多 MediaServer 的 albumArtURI 只给路径（如 /art/1.jpg），
+     * 以 ContentDirectory 的 controlUrl 为基准拼全（协议+主机+端口保持一致）。
+     */
+    private fun absoluteUrl(raw: String, base: String): String {
+        val raw = raw.trim()
+        if (raw.isEmpty()) return ""
+        if (raw.startsWith("http://") || raw.startsWith("https://")) return raw
+        return runCatching {
+            val url = java.net.URL(java.net.URL(base), raw)
+            if (url.protocol == "http" || url.protocol == "https") url.toString() else ""
+        }.getOrDefault("")
     }
 
     /** dc:title 或 title（设备命名习惯不一），取第一个非空 */

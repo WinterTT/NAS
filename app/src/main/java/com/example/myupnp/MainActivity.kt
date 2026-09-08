@@ -41,6 +41,7 @@ import com.example.myupnp.model.UpnpService
 import com.example.myupnp.soap.SoapCaller
 import com.example.myupnp.ssdp.SsdpDiscovery
 import kotlinx.coroutines.launch
+import java.net.HttpURLConnection
 import java.net.Inet4Address
 import java.net.URL
 
@@ -85,6 +86,11 @@ class MainActivity : AppCompatActivity() {
     private lateinit var btnNowNext: ImageButton
     private lateinit var tvNowQueue: TextView
     private lateinit var tvQueueEntry: TextView
+
+    // ===== 第 7 课 C：封面缩略图 + 歌手/专辑小字 =====
+    private lateinit var imgNowArt: android.widget.ImageView
+    private lateinit var tvNowMeta: TextView
+    private var lastArtUrl: String? = null // 已加载封面的地址（避免重复下载）
 
     /** 用户正在拖动进度条（避免 ticker 抢进度） */
     private var seekDragging = false
@@ -227,6 +233,8 @@ class MainActivity : AppCompatActivity() {
         btnNowPrev = findViewById(R.id.btnNowPrev)
         btnNowNext = findViewById(R.id.btnNowNext)
         tvNowQueue = findViewById(R.id.tvNowQueue)
+        imgNowArt = findViewById(R.id.imgNowArt)
+        tvNowMeta = findViewById(R.id.tvNowMeta)
 
         btnNowPlayPause.setOnClickListener { togglePlayPause() }
         btnNowStop.setOnClickListener { stopNowPlaying() }
@@ -317,6 +325,14 @@ class MainActivity : AppCompatActivity() {
                     tvNowVolume.visibility = if (s.nowPlayingHasRc) View.VISIBLE else View.GONE
                     // 播放队列：待播几首显示在入口上
                     tvNowQueue.text = "队列(${s.queuePendingCount})"
+                    // 第 7 课 C：歌手 · 专辑 小字
+                    val meta = listOf(s.nowPlayingArtist, s.nowPlayingAlbum)
+                        .filter { it.isNotBlank() }
+                        .joinToString(" · ")
+                    tvNowMeta.text = meta
+                    tvNowMeta.visibility = if (meta.isEmpty()) View.GONE else View.VISIBLE
+                    // 第 7 课 C：专辑封面（异步下载，切歌防串图）
+                    loadArtwork(s.nowPlayingArtUrl)
                 } else {
                     nowPlayingBar.visibility = View.GONE
                 }
@@ -757,6 +773,76 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    // ------------------------------------------------------------------
+    // 第 7 课 C：专辑封面下载（后台线程；失败或切歌时安全隐藏）
+    // ------------------------------------------------------------------
+
+    /** 封面加载：只应用"还是当前这首歌"的结果，防止切歌时串图 */
+    private fun loadArtwork(url: String) {
+        if (url.isBlank()) {
+            lastArtUrl = null
+            imgNowArt.visibility = View.GONE
+            return
+        }
+        if (url == lastArtUrl) return // 已处理过（成功/失败都记，避免反复请求）
+        lastArtUrl = url
+        imgNowArt.visibility = View.GONE // 先隐藏，加载成功再亮
+        fetchExecutor.execute {
+            val bytes = runCatching { downloadWithLimit(url, MAX_ART_BYTES) }.getOrNull()
+            val bitmap = bytes?.let { decodeScaled(it, ART_TARGET_PX) }
+            mainHandler.post {
+                if (vm.uiState.value.nowPlayingArtUrl == url) {
+                    if (bitmap != null) {
+                        imgNowArt.setImageBitmap(bitmap)
+                        imgNowArt.visibility = View.VISIBLE
+                    } else {
+                        imgNowArt.visibility = View.GONE
+                    }
+                }
+            }
+        }
+    }
+
+    /** 下载图片字节（限长，防超大图拖垮内存） */
+    private fun downloadWithLimit(url: String, maxBytes: Int): ByteArray? {
+        val conn = (java.net.URL(url).openConnection() as HttpURLConnection).apply {
+            connectTimeout = 8000
+            readTimeout = 8000
+            instanceFollowRedirects = true
+        }
+        return try {
+            if (conn.responseCode != HttpURLConnection.HTTP_OK) return null
+            conn.inputStream.use { ins ->
+                val out = java.io.ByteArrayOutputStream()
+                val buf = ByteArray(8192)
+                var total = 0
+                while (true) {
+                    val n = ins.read(buf)
+                    if (n < 0) break
+                    total += n
+                    if (total > maxBytes) return null
+                    out.write(buf, 0, n)
+                }
+                out.toByteArray()
+            }
+        } finally {
+            conn.disconnect()
+        }
+    }
+
+    /** 缩放解码：最长边超过 target 就按比例抽稀，避免解码超大原图 */
+    private fun decodeScaled(data: ByteArray, target: Int): android.graphics.Bitmap? {
+        val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        android.graphics.BitmapFactory.decodeByteArray(data, 0, data.size, bounds)
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+        var sample = 1
+        while (bounds.outWidth / sample > target * 2 || bounds.outHeight / sample > target * 2) {
+            sample *= 2
+        }
+        val opts = android.graphics.BitmapFactory.Options().apply { inSampleSize = sample }
+        return android.graphics.BitmapFactory.decodeByteArray(data, 0, data.size, opts)
+    }
+
     /** 真正推送一首歌到指定播放器（含日志、结果、自动订阅 + 显示控制条） */
     private fun pushToRenderer(
         renderer: UpnpService,
@@ -780,7 +866,16 @@ class MainActivity : AppCompatActivity() {
             }
             if (results.lastOrNull()?.second?.success == true) {
                 mainHandler.post {
-                    setNowPlaying(deviceName, renderer, rc, item.title, deviceKey)
+                    setNowPlaying(
+                        deviceName = deviceName,
+                        avt = renderer,
+                        rc = rc,
+                        title = item.title,
+                        deviceKey = deviceKey,
+                        artist = item.artist,
+                        album = item.album,
+                        artUrl = item.artUrl
+                    )
                     // 记入播放队列的"当前这首"（排队的歌会在播完后自动接上）
                     vm.queueOnPlayed(item)
                     Toast.makeText(this, "已推送给 $targetName 播放", Toast.LENGTH_SHORT).show()
@@ -801,9 +896,15 @@ class MainActivity : AppCompatActivity() {
         avt: UpnpService,
         rc: UpnpService?,
         title: String,
-        deviceKey: String? = null
+        deviceKey: String? = null,
+        artist: String = "",
+        album: String = "",
+        artUrl: String = ""
     ) {
-        nowSession.begin(deviceName, avt, rc, title, deviceKey = deviceKey)
+        nowSession.begin(
+            deviceName, avt, rc, title,
+            deviceKey = deviceKey, artist = artist, album = album, artUrl = artUrl
+        )
     }
 
     /** 播放/暂停切换 → 转发给会话 */
@@ -1180,6 +1281,12 @@ class MainActivity : AppCompatActivity() {
             "Speed" to "1",        // Play 的播放速度
             "Channel" to "Master"  // RenderingControl 的音量通道
         )
+
+        /** 封面下载上限（字节）：防止个别超大图拖垮内存 */
+        private const val MAX_ART_BYTES = 2 * 1024 * 1024
+
+        /** 封面显示目标边长（px，物理像素） */
+        private const val ART_TARGET_PX = 240
 
         /** logcat 统一 TAG：adb logcat -s MyUPNP 过滤 */
         private const val TAG = "MyUPNP"

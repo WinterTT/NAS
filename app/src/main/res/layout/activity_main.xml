@@ -102,6 +102,17 @@
             android:gravity="center_vertical"
             android:orientation="horizontal">
 
+            <!-- 第 7 课 C：专辑封面缩略图（有封面才显示） -->
+            <ImageView
+                android:id="@+id/imgNowArt"
+                android:layout_width="44dp"
+                android:layout_height="44dp"
+                android:layout_marginEnd="8dp"
+                android:contentDescription="专辑封面"
+                android:scaleType="centerCrop"
+                android:visibility="gone"
+                tools:visibility="gone" />
+
             <LinearLayout
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
@@ -147,6 +158,18 @@
                         android:textColor="@color/now_bar_subtext"
                         android:textSize="12sp" />
                 </LinearLayout>
+
+                <!-- 第 7 课 C：歌手 · 专辑 小字（曲库元数据里有才显示） -->
+                <TextView
+                    android:id="@+id/tvNowMeta"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:ellipsize="end"
+                    android:maxLines="1"
+                    android:textColor="@color/now_bar_subtext"
+                    android:textSize="11sp"
+                    android:visibility="gone"
+                    tools:visibility="gone" />
             </LinearLayout>
 
             <ImageButton

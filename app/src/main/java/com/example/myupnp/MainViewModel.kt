@@ -436,6 +436,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val nowPlayingActive: Boolean = false,
         val nowPlayingTitle: String = "",
         val nowPlayingDevice: String = "",
+        // ---- 第 7 课 C：曲目元数据（歌手/专辑/封面） ----
+        val nowPlayingArtist: String = "",
+        val nowPlayingAlbum: String = "",
+        val nowPlayingArtUrl: String = "",
         val nowPlayingPlaying: Boolean = false,
         val nowPlayingHasRc: Boolean = false,
         val positionSec: Long = 0L,
@@ -534,6 +538,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 nowPlayingActive = np != null,
                 nowPlayingTitle = np?.title.orEmpty(),
                 nowPlayingDevice = np?.deviceName.orEmpty(),
+                nowPlayingArtist = np?.artist.orEmpty(),
+                nowPlayingAlbum = np?.album.orEmpty(),
+                nowPlayingArtUrl = np?.artUrl.orEmpty(),
                 nowPlayingPlaying = np?.playing == true,
                 nowPlayingHasRc = np?.rc != null,
                 positionSec = np?.positionSec ?: 0L,
@@ -739,7 +746,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         avt = np.avt,
                         rc = np.rc,
                         title = item.title,
-                        deviceKey = np.deviceKey
+                        deviceKey = np.deviceKey,
+                        artist = item.artist,
+                        album = item.album,
+                        artUrl = item.artUrl
                     )
                     postMessage("▶ 正在播放：《${item.title}》")
                 } else {

@@ -40,7 +40,13 @@ data class MediaItem(
     /** res 元素里的实际资源地址，给播放器 SetAVTransportURI 用 */
     val resUrl: String = "",
     /** res 的 MIME，如 audio/mpeg */
-    val mime: String = ""
+    val mime: String = "",
+    /** 第 7 课 C：歌手（upnp:artist / dc:creator） */
+    val artist: String = "",
+    /** 第 7 课 C：专辑（upnp:album） */
+    val album: String = "",
+    /** 第 7 课 C：专辑封面地址（upnp:albumArtURI，相对路径已绝对化） */
+    val artUrl: String = ""
 ) : MediaObject() {
     override fun displayText(): String {
         val icon = when {
@@ -49,6 +55,8 @@ data class MediaItem(
             upnpClass.contains("imageItem") -> "🖼️"
             else -> "📄"
         }
-        return "$icon $title"
+        // 第 7 课 C：曲库行尾带歌手，选歌更方便
+        val artistSuffix = if (artist.isNotBlank()) "  — $artist" else ""
+        return "$icon $title$artistSuffix"
     }
 }
