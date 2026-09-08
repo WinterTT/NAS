@@ -99,15 +99,35 @@
                     android:textColor="@color/now_bar_subtext"
                     android:textSize="11sp" />
 
-                <TextView
-                    android:id="@+id/tvNowTitle"
+                <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:ellipsize="end"
-                    android:maxLines="1"
-                    android:textColor="@color/now_bar_text"
-                    android:textSize="14sp"
-                    android:textStyle="bold" />
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:id="@+id/tvNowTitle"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:ellipsize="end"
+                        android:maxLines="1"
+                        android:textColor="@color/now_bar_text"
+                        android:textSize="14sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:id="@+id/tvNowVolume"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:drawablePadding="2dp"
+                        android:drawableStart="@drawable/ic_vol_up"
+                        android:drawableTint="@color/now_bar_subtext"
+                        android:gravity="center_vertical"
+                        android:minHeight="16dp"
+                        android:text="--"
+                        android:textColor="@color/now_bar_subtext"
+                        android:textSize="12sp" />
+                </LinearLayout>
             </LinearLayout>
 
             <ImageButton

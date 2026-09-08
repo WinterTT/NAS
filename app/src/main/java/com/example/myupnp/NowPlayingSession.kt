@@ -2,6 +2,7 @@ package com.example.myupnp
 
 import android.os.Handler
 import android.util.Log
+import com.example.myupnp.dlna.DlnaPlayer
 import com.example.myupnp.model.UpnpService
 import com.example.myupnp.soap.SoapCaller
 import java.net.URL
@@ -43,7 +44,9 @@ class NowPlayingSession(
         // ---- 进度（秒），由 GENA 事件校准，本地 tick 推进 ----
         var positionSec: Long = 0L,
         var durationSec: Long = 0L,
-        var seekable: Boolean = false   // 是否支持 Seek（有总时长才可拖）
+        var seekable: Boolean = false,   // 是否支持 Seek（有总时长才可拖）
+        // ---- 音量（0-100），由 GENA 事件 / GetVolume 更新 ----
+        var volume: Int? = null          // null = 未知
     )
 
     private var session: NowPlaying? = null
@@ -72,6 +75,7 @@ class NowPlayingSession(
         )
         Log.i(TAG, "[NOW] 播放会话: $title @ $deviceName")
         listener.onChanged(this)
+        if (rc != null) refreshVolume() // 建立会话后主动问一次当前音量
     }
 
     /**
@@ -123,6 +127,30 @@ class NowPlayingSession(
         positionSec?.let { np.positionSec = it }
         np.seekable = np.durationSec > 0
         listener.onChanged(this)
+    }
+
+    /** 更新当前音量（GENA 事件 / GetVolume 查询），null 表示未知 */
+    fun syncVolume(volume: Int?) {
+        val np = session ?: return
+        volume?.let { np.volume = it.coerceIn(0, 100) }
+        listener.onChanged(this)
+    }
+
+    /** 主动问设备当前音量（GetVolume），用于刚建立会话/恢复时显示 */
+    fun refreshVolume() {
+        val rc = session?.rc ?: return
+        controlExecutor.execute {
+            val r = SoapCaller.call(
+                rc.controlUrl, rc.serviceType, "GetVolume",
+                mapOf("InstanceID" to "0", "Channel" to "Master")
+            )
+            mainHandler.post {
+                if (r.success) {
+                    val v = DlnaPlayer.parseCurrentVolume(r.body)
+                    if (v >= 0) syncVolume(v)
+                }
+            }
+        }
     }
 
     /** 跳转到指定秒（AVTransport Seek，REL_TIME 单位） */

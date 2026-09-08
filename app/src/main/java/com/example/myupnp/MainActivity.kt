@@ -78,6 +78,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var seekNow: android.widget.SeekBar
     private lateinit var tvNowTime: TextView
     private lateinit var tvNowDuration: TextView
+    private lateinit var tvNowVolume: TextView
 
     /** 用户正在拖动进度条（避免 ticker 抢进度） */
     private var seekDragging = false
@@ -207,6 +208,7 @@ class MainActivity : AppCompatActivity() {
         seekNow = findViewById(R.id.seekNow)
         tvNowTime = findViewById(R.id.tvNowTime)
         tvNowDuration = findViewById(R.id.tvNowDuration)
+        tvNowVolume = findViewById(R.id.tvNowVolume)
 
         btnNowPlayPause.setOnClickListener { togglePlayPause() }
         btnNowStop.setOnClickListener { stopNowPlaying() }
@@ -272,6 +274,9 @@ class MainActivity : AppCompatActivity() {
                     tvNowTime.text = fmtDuration(s.positionSec)
                     tvNowDuration.text = fmtDuration(s.durationSec)
                     seekNow.isEnabled = s.seekable && !s.nowPlayingDevice.isEmpty()
+                    // 音量显示（未知显示 --）
+                    tvNowVolume.text = s.volume?.toString() ?: "--"
+                    tvNowVolume.visibility = if (s.nowPlayingHasRc) View.VISIBLE else View.GONE
                 } else {
                     nowPlayingBar.visibility = View.GONE
                 }
@@ -734,6 +739,10 @@ class MainActivity : AppCompatActivity() {
             mainHandler.post {
                 if (r.success) {
                     appendLog("  音量 $before -> $after")
+                    // 若步进的就是当前播放会话的设备，同步到控制条显示
+                    if (after >= 0 && nowSession.current?.rc?.controlUrl == rc.controlUrl) {
+                        nowSession.syncVolume(after)
+                    }
                 } else {
                     logActionResult("SetVolume", r)
                 }

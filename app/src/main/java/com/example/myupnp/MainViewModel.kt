@@ -374,6 +374,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         positionSec = lc.relativeTimePosition?.let(::hmsToSec),
                         durationSec = lc.currentTrackDuration?.let(::hmsToSec)
                     )
+                    // 音量：LastChange 里可能带（RenderingControl 事件）
+                    lc.volume?.toIntOrNull()?.let { nowSession.syncVolume(it) }
                 }
             }
         }
@@ -426,6 +428,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val positionSec: Long = 0L,
         val durationSec: Long = 0L,
         val seekable: Boolean = false,
+        /** 当前音量 0-100，null = 未知（无 RenderingControl 或未读到） */
+        val volume: Int? = null,
     )
 
     private val _uiState = MutableStateFlow(UiState())
@@ -503,6 +507,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 positionSec = np?.positionSec ?: 0L,
                 durationSec = np?.durationSec ?: 0L,
                 seekable = np?.seekable == true,
+                volume = np?.volume,
             )
         }
         // 有会话就记忆"上次在播什么"（重启后恢复用）
