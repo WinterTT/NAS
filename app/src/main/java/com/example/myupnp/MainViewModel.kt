@@ -12,6 +12,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.myupnp.core.EverythingFreeGate
 import com.example.myupnp.core.FeatureGate
+import com.example.myupnp.core.FeatureId
 import com.example.myupnp.dlna.DlnaPlayer
 import com.example.myupnp.dlna.LastChangeParser
 import com.example.myupnp.gena.EventProperties
@@ -63,6 +64,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         Thread(r, "soap-control").apply { isDaemon = true }
     }
     val featureGate: FeatureGate = EverythingFreeGate
+
+    /** 设备级用户数据（第 7 课 E：收藏/别名，持久化） */
+    val bookmarks = DeviceBookmarks(getApplication())
 
     // ------------------------------------------------------------------
     // 设备/订阅/播放状态对象
@@ -469,6 +473,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             if (device != null && isMediaServer(device)) mediaServer.add(entry)
             else others.add(entry)
         }
+        // 收藏置顶（各自分组内）；未收藏的保持发现顺序（排序稳定）
+        mediaServer.sortByDescending { isFavoriteEntry(it) }
+        others.sortByDescending { isFavoriteEntry(it) }
         val rows = ArrayList<DeviceListItem>()
         fun appendGroup(title: String, group: List<Entry>) {
             if (group.isEmpty()) return
@@ -488,13 +495,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private fun formatDeviceText(entry: Entry): String {
         val device = entry.device
         return if (device != null) {
-            "${device.friendlyName.ifEmpty { "（未命名）" }}\n" +
-                "  型号: ${device.modelName.ifEmpty { "?" }} | " +
-                "制造商: ${device.manufacturer.ifEmpty { "?" }}\n" +
-                "  类型: ${device.deviceType.substringAfterLast(':').ifEmpty { device.deviceType }}\n" +
-                "  服务(${device.services.size}): " +
-                device.services.joinToString(", ") { it.serviceType.substringAfterLast(':') } +
-                "\n  @ ${entry.location}"
+            val star = if (isFavoriteEntry(entry)) "⭐ " else ""
+            val alias = bookmarks.alias(deviceIdOf(entry))
+            val main = alias ?: device.friendlyName.ifEmpty { "（未命名）" }
+            buildString {
+                appendLine("$star$main")
+                appendLine(
+                    "  型号: ${device.modelName.ifEmpty { "?" }} | " +
+                        "制造商: ${device.manufacturer.ifEmpty { "?" }}"
+                )
+                if (alias != null) appendLine("  原名: ${device.friendlyName.ifEmpty { "（未命名）" }}")
+                appendLine("  类型: ${device.deviceType.substringAfterLast(':').ifEmpty { device.deviceType }}")
+                appendLine(
+                    "  服务(${device.services.size}): " +
+                        device.services.joinToString(", ") { it.serviceType.substringAfterLast(':') }
+                )
+                append("@ ${entry.location}")
+            }.trimEnd()
         } else {
             "（等待描述…）\n  USN: ${entry.usn ?: "?"}\n  @ ${entry.location}" +
                 if (entry.failed) "\n  描述获取失败" else ""
@@ -733,6 +750,91 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
         }
+    }
+
+    // ------------------------------------------------------------------
+    // 第 7 课 E：设备收藏 / 别名（持久化到 DeviceBookmarks）
+    // ------------------------------------------------------------------
+
+    /**
+     * 设备稳定身份：UDN > USN 的 uuid > LOCATION（最后兜底，重启可能变 IP）。
+     * 收藏与别名都以它为键 —— 设备 IP 变了仍能认回同一台。
+     */
+    fun deviceIdOf(entry: Entry): String {
+        val udn = entry.device?.udn?.trim().orEmpty()
+        if (udn.isNotEmpty()) return udn
+        val uuid = entry.usn?.substringBefore("::")?.trim().orEmpty()
+        if (uuid.isNotEmpty()) return uuid
+        return entry.location
+    }
+
+    fun isFavoriteEntry(entry: Entry): Boolean = bookmarks.isFavorite(deviceIdOf(entry))
+
+    /** 设备对外显示的名字：别名优先，其次 friendlyName */
+    fun shownNameOf(entry: Entry): String {
+        val alias = bookmarks.alias(deviceIdOf(entry))
+        if (alias != null) return alias
+        val friendly = entry.device?.friendlyName?.trim().orEmpty()
+        return when {
+            friendly.isNotEmpty() -> friendly
+            entry.device == null -> "（等待描述）"
+            else -> "（未命名）"
+        }
+    }
+
+    /** "选设备播放"用：收藏在前，其余保持发现顺序 */
+    fun deviceEntriesFavoritesFirst(): List<Entry> {
+        val list = registry.all().toMutableList()
+        list.sortByDescending { isFavoriteEntry(it) }
+        return list
+    }
+
+    /**
+     * 免费版收藏上限（收藏功能属于"设备管理增强"，可挂 FeatureId.DEVICE_LIMIT）。
+     * 现在 EverythingFreeGate 恒放行 → 不限；将来换真实 Gate 后，免费用户
+     * 超上限时这里会自动弹升级提示（逻辑已就位）。
+     */
+    private val freeFavoriteLimit = 3
+
+    fun toggleFavorite(entryKey: String) {
+        val entry = registry[entryKey] ?: return
+        val id = deviceIdOf(entry)
+        val name = shownNameOf(entry)
+        val favorite = bookmarks.isFavorite(id)
+        if (!favorite) {
+            // 收费口子：超上限且未解锁才拦（EverythingFreeGate 下永不拦）
+            val overLimit = bookmarks.favoriteTotal() >= freeFavoriteLimit
+            if (overLimit && !guardFeature(FeatureId.DEVICE_LIMIT) { msg ->
+                    postMessage("$msg（免费版最多收藏 $freeFavoriteLimit 台）", isError = true)
+                }) return
+        }
+        bookmarks.setFavorite(id, !favorite)
+        postMessage(if (!favorite) "已收藏《$name》，列表置顶 ⭐" else "已取消收藏《$name》")
+        rebuildDeviceRows()
+    }
+
+    fun renameDevice(entryKey: String, rawName: String) {
+        val entry = registry[entryKey] ?: return
+        val id = deviceIdOf(entry)
+        val name = rawName.trim()
+        if (name.isEmpty()) {
+            postMessage("名称不能为空（想恢复原名请用「恢复原名」）", isError = true)
+            return
+        }
+        if (name.length > 30) {
+            postMessage("别名最多 30 个字", isError = true)
+            return
+        }
+        bookmarks.setAlias(id, name)
+        postMessage("已重命名为《$name》")
+        rebuildDeviceRows()
+    }
+
+    fun clearDeviceAlias(entryKey: String) {
+        val entry = registry[entryKey] ?: return
+        bookmarks.clearAlias(deviceIdOf(entry))
+        postMessage("已恢复原名《${entry.device?.friendlyName ?: ""}》")
+        rebuildDeviceRows()
     }
 
     // ------------------------------------------------------------------

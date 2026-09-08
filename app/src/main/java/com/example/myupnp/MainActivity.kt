@@ -186,6 +186,14 @@ class MainActivity : AppCompatActivity() {
             }
             showDeviceActions(entry, device)
         }
+        // 第 7 课 E：长按设备 -> 设备管理（收藏 / 重命名）
+        listDevices.setOnItemLongClickListener { _, _, position, _ ->
+            val item = adapter.getItem(position) as? DeviceListItem.DeviceItem
+                ?: return@setOnItemLongClickListener false
+            val entry = registry[item.entryKey] ?: return@setOnItemLongClickListener false
+            showDeviceManageDialog(entry, entry.device)
+            true
+        }
 
         btnStart.setOnClickListener {
             if (discovery.isRunning()) return@setOnClickListener
@@ -267,7 +275,8 @@ class MainActivity : AppCompatActivity() {
                 }
                 // 设备标题计数
                 tvDeviceTitle.text =
-                    getString(R.string.device_title) + "  (${s.deviceCount})"
+                    getString(R.string.device_title) + "  (${s.deviceCount})" +
+                        if (s.deviceCount > 0) "　长按=收藏/重命名" else ""
                 // 首页队列入口：队列有内容才显示（没在播放也能点开）
                 if (s.queueHasItems) {
                     tvQueueEntry.visibility = View.VISIBLE
@@ -374,11 +383,12 @@ class MainActivity : AppCompatActivity() {
             val renderer = DlnaPlayer.avTransportOf(device)!!
             val rc = DlnaPlayer.renderingControlOf(device)
             AlertDialog.Builder(this)
-                .setTitle(device.friendlyName.ifEmpty { "播放器" })
+                .setTitle(vm.shownNameOf(entry))
                 .setItems(
                     arrayOf(
                         "▶ 播放器场景（推送 URL 播放）",
-                        "服务控制 / 订阅（SOAP + GENA）"
+                        "服务控制 / 订阅（SOAP + GENA）",
+                        "⚙ 设备管理（收藏 / 重命名）"
                     )
                 ) { _, which ->
                     when (which) {
@@ -390,6 +400,7 @@ class MainActivity : AppCompatActivity() {
                             deviceKey = entry.location
                         )
                         1 -> showServicePicker(entry, device)
+                        2 -> showDeviceManageDialog(entry, device)
                     }
                 }
                 .setNegativeButton("取消", null)
@@ -407,8 +418,10 @@ class MainActivity : AppCompatActivity() {
                     menus += "服务控制 / 订阅（SOAP + GENA）"
                     actions += { showServicePicker(entry, device) }
                 }
+                menus += "⚙ 设备管理（收藏 / 重命名）"
+                actions += { showDeviceManageDialog(entry, device) }
                 AlertDialog.Builder(this)
-                    .setTitle(device.friendlyName.ifEmpty { "MediaServer" })
+                    .setTitle(vm.shownNameOf(entry))
                     .setItems(menus.toTypedArray()) { _, which ->
                         actions[which]()
                     }
@@ -418,6 +431,43 @@ class MainActivity : AppCompatActivity() {
             }
         }
         showServicePicker(entry, device)
+    }
+
+    /** 设备管理：收藏 / 重命名 / 恢复原名（长按设备行或从设备菜单进） */
+    private fun showDeviceManageDialog(entry: Entry, device: UpnpDevice?) {
+        val alias = vm.bookmarks.alias(vm.deviceIdOf(entry))
+        val favorite = vm.isFavoriteEntry(entry)
+        val options = mutableListOf(
+            if (favorite) "取消收藏（从置顶移除 ⭐）" else "⭐ 收藏（列表置顶）",
+            if (alias == null) "重命名（设置别名）" else "重命名（当前别名：$alias）"
+        )
+        if (alias != null) options += "恢复原名"
+        AlertDialog.Builder(this)
+            .setTitle(vm.shownNameOf(entry))
+            .setItems(options.toTypedArray()) { _, which ->
+                when (which) {
+                    0 -> vm.toggleFavorite(entry.location)
+                    1 -> showRenameDialog(entry, device, alias)
+                    2 -> if (alias != null) vm.clearDeviceAlias(entry.location)
+                }
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    private fun showRenameDialog(entry: Entry, device: UpnpDevice?, currentAlias: String?) {
+        val input = EditText(this).apply {
+            hint = device?.friendlyName?.ifEmpty { null } ?: "例如：客厅音响"
+            setText(currentAlias.orEmpty())
+            setSelection(text.length)
+        }
+        AlertDialog.Builder(this)
+            .setTitle("重命名设备")
+            .setMessage("只改 App 里的显示名，不影响设备本身")
+            .setView(input)
+            .setPositiveButton("保存") { _, _ -> vm.renameDevice(entry.location, input.text.toString()) }
+            .setNegativeButton("取消", null)
+            .show()
     }
 
     /**
@@ -571,11 +621,13 @@ class MainActivity : AppCompatActivity() {
         fun collectRenderers() {
             pairs.clear()
             names.clear()
-            for (e in registry.all()) {
+            // 收藏的设备排前面，显示用别名（第 7 课 E）
+            for (e in vm.deviceEntriesFavoritesFirst()) {
                 val d = e.device ?: continue
                 val avt = DlnaPlayer.avTransportOf(d) ?: continue
                 pairs.add(e to avt)
-                val tag = "📺 ${d.friendlyName.ifEmpty { "未命名" }}  ${d.modelName}"
+                val star = if (vm.isFavoriteEntry(e)) "⭐ " else ""
+                val tag = "$star📺 ${vm.shownNameOf(e)}  ${d.modelName}"
                 names.add(tag)
             }
         }
