@@ -89,6 +89,21 @@ class SsdpDiscovery(private val listener: Listener) {
 
     fun isRunning(): Boolean = running
 
+    /**
+     * 立即主动搜索一次（不等周期定时）。
+     * 用于用户手动"刷新设备"：刚开机/刚上线但还没到下一个周期的设备能立刻被问到。
+     * 线程安全：仅读 sendSocket，并包 try（stop 时可能为 null/已关闭）。
+     */
+    fun forceSearch() {
+        if (!running) return
+        runCatching {
+            sendSocket?.let { sock ->
+                sendMSearch(sock)
+                listener.onSsdpInfo("手动触发 M-SEARCH（刷新设备）")
+            }
+        }
+    }
+
     // ------------------------------------------------------------------
     // 线程 A：周期发 M-SEARCH + 收单播应答
     // ------------------------------------------------------------------

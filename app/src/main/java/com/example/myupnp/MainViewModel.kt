@@ -235,6 +235,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         clearNowPlayingIfDeviceGone()
     }
 
+    /** 立即主动搜索一次（用户点"刷新设备"时用） */
+    fun refreshDevicesNow() {
+        discovery.forceSearch()
+    }
+
     /**
      * 释放扫描资源（引擎/锁/订阅/回调服务器/列表/心跳），
      * 不改 userWantsScan —— 供"Wi-Fi 断开/IP 变化"这类暂时停使用。

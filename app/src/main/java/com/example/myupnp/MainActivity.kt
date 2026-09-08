@@ -14,6 +14,7 @@ import android.os.Handler
 import android.util.Log
 import android.view.View
 import android.view.ViewGroup
+import android.widget.ArrayAdapter
 import android.widget.Button
 import android.widget.EditText
 import android.widget.ImageButton
@@ -461,53 +462,88 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    /** 曲库里点歌：先列出所有可播放设备让用户选（只有一台才直接播） */
+    /** 曲库里点歌：弹出"选设备播放"框（可刷新设备列表，设备没找到也能重扫） */
     private fun playMediaItemFromServer(item: MediaItem) {
         if (item.resUrl.isBlank()) {
             Toast.makeText(this, "该条目没有可播放地址(res)", Toast.LENGTH_SHORT).show()
             return
         }
-        // 收集所有 MediaRenderer（有 AVTransport 服务），按发现顺序
-        val renderers = registry.all()
-            .mapNotNull { e -> e.device?.let { d -> (DlnaPlayer.avTransportOf(d))?.let { avt -> e to avt } } }
-            .filter { it.first.device != null }
 
-        if (renderers.isEmpty()) {
-            Toast.makeText(this, "没发现可播放的 MediaRenderer（音响/电视）", Toast.LENGTH_LONG).show()
-            return
+        // 对话框里的数据源：发现到的播放器 (设备, AVTransport 服务)
+        val pairs = mutableListOf<Pair<Entry, UpnpService>>()
+        val names = mutableListOf<String>()
+        var listAdapter: ArrayAdapter<String>? = null
+
+        fun collectRenderers() {
+            pairs.clear()
+            names.clear()
+            for (e in registry.all()) {
+                val d = e.device ?: continue
+                val avt = DlnaPlayer.avTransportOf(d) ?: continue
+                pairs.add(e to avt)
+                val tag = "📺 ${d.friendlyName.ifEmpty { "未命名" }}  ${d.modelName}"
+                names.add(tag)
+            }
         }
-        if (renderers.size == 1) {
-            val e = renderers[0].first
+
+        fun pushSelected(index: Int) {
+            val (e, avt) = pairs[index]
             pushToRenderer(
-                renderer = renderers[0].second,
+                renderer = avt,
                 deviceName = e.device!!.friendlyName,
                 rc = e.device!!.let { DlnaPlayer.renderingControlOf(it) },
                 item = item,
                 device = e.device!!,
                 deviceKey = e.location
             )
+        }
+
+        // 刷新动作：触发引擎立即 M-SEARCH，1.5s 后（MX 内应答回到注册表）重取列表
+        fun refresh() {
+            vm.refreshDevicesNow()
+            Toast.makeText(this, "正在搜索设备…", Toast.LENGTH_SHORT).show()
+            mainHandler.postDelayed({
+                collectRenderers()
+                listAdapter?.notifyDataSetChanged()
+                if (pairs.isEmpty()) {
+                    Toast.makeText(this, "仍没找到可播放设备", Toast.LENGTH_SHORT).show()
+                }
+            }, 1_500L)
+        }
+
+        // ---- 自绘对话框：可刷新 ListView + 底部按钮 ----
+        collectRenderers()
+
+        // 单台设备时：不弹框，直接推（原行为），避免打断
+        if (pairs.size == 1) {
+            pushSelected(0)
             return
         }
-        // 多台播放设备 -> 弹框让用户选推给谁
-        val names = renderers.map { (e, _) ->
-            val d = e.device!!
-            "📺 ${d.friendlyName.ifEmpty { "未命名" }}  ${d.modelName}"
+
+        // 空/多台都弹同一个框：空时列表空，靠"刷新"按钮找设备
+        val listView = ListView(this).apply {
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            )
         }
-        AlertDialog.Builder(this)
+        listAdapter = ArrayAdapter(this, android.R.layout.simple_list_item_1, names)
+        listView.adapter = listAdapter
+
+        val btnRefresh = Button(this).apply { text = "🔄 刷新设备列表" }
+        val panel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(30, 8, 30, 4)
+            addView(listView)
+            addView(btnRefresh)
+        }
+        val dialog = AlertDialog.Builder(this)
             .setTitle("推送给哪台设备播放？")
-            .setItems(names.toTypedArray()) { _, which ->
-                val (e, avt) = renderers[which]
-                pushToRenderer(
-                    renderer = avt,
-                    deviceName = e.device!!.friendlyName,
-                    rc = e.device!!.let { DlnaPlayer.renderingControlOf(it) },
-                    item = item,
-                    device = e.device!!,
-                    deviceKey = e.location
-                )
-            }
+            .setView(panel)
             .setNegativeButton("取消", null)
             .show()
+        listView.setOnItemClickListener { _, _, which, _ -> pushSelected(which); dialog.dismiss() }
+        btnRefresh.setOnClickListener { refresh() }
     }
 
     /** 真正推送一首歌到指定播放器（含日志、结果、自动订阅 + 显示控制条） */
