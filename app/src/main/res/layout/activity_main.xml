@@ -9,21 +9,21 @@
     android:orientation="vertical"
     tools:context=".MainActivity">
 
-    <!-- ============ 页面容器：播放 / 媒体库 / 设备 ============ -->
+    <!-- ============ 页面容器：媒体库 / 播放 / 设置 ============ -->
     <FrameLayout
         android:id="@+id/contentHost"
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1">
 
-        <!-- ========== 页 1：设备（默认页：扫描 + 设备列表） ========== -->
+        <!-- ========== 页 1：媒体库（扫描 + 媒体服务器列表） ========== -->
         <LinearLayout
-            android:id="@+id/pageDevices"
+            android:id="@+id/pageLibrary"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
             android:orientation="vertical">
 
-            <!-- 顶栏：标题 + 扫描开关 -->
+            <!-- 页头：标题 + 扫描开关 -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -34,11 +34,10 @@
                 android:orientation="horizontal">
 
                 <TextView
-                    android:id="@+id/tvAppTitle"
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
-                    android:text="@string/app_name"
+                    android:text="@string/lib_title"
                     android:textColor="@color/text_primary"
                     android:textSize="20sp"
                     android:textStyle="bold" />
@@ -75,7 +74,7 @@
                     tools:visibility="visible" />
             </LinearLayout>
 
-            <!-- 状态行 -->
+            <!-- 状态行（空闲/扫描中/Wi-Fi 断开） -->
             <TextView
                 android:id="@+id/tvStatus"
                 android:layout_width="match_parent"
@@ -86,44 +85,16 @@
                 android:textColor="@color/text_secondary"
                 android:textSize="13sp" />
 
-            <!-- 设备区标题 + 清空 -->
-            <LinearLayout
+            <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginStart="16dp"
-                android:layout_marginTop="14dp"
-                android:layout_marginEnd="16dp"
-                android:gravity="center_vertical"
-                android:orientation="horizontal">
+                android:layout_marginHorizontal="16dp"
+                android:layout_marginTop="2dp"
+                android:text="@string/lib_subtitle"
+                android:textColor="@color/text_faint"
+                android:textSize="12sp" />
 
-                <TextView
-                    android:id="@+id/tvDeviceTitle"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:ellipsize="end"
-                    android:maxLines="1"
-                    android:text="@string/device_title"
-                    android:textColor="@color/text_secondary"
-                    android:textSize="13sp"
-                    android:textStyle="bold" />
-
-                <androidx.appcompat.widget.AppCompatButton
-                    android:id="@+id/btnClear"
-                    android:layout_width="wrap_content"
-                    android:layout_height="32dp"
-                    android:background="@drawable/bg_pill_ghost"
-                    android:minWidth="0dp"
-                    android:paddingStart="14dp"
-                    android:paddingEnd="14dp"
-                    android:stateListAnimator="@null"
-                    android:text="@string/btn_clear"
-                    android:textAllCaps="false"
-                    android:textColor="@color/text_secondary"
-                    android:textSize="12sp" />
-            </LinearLayout>
-
-            <!-- 首页常驻的"播放队列"入口 -->
+            <!-- 播放队列入口（没在播放也能点开队列） -->
             <TextView
                 android:id="@+id/tvQueueEntry"
                 android:layout_width="match_parent"
@@ -143,72 +114,12 @@
                 android:visibility="gone"
                 tools:visibility="gone" />
 
-            <!-- 设备列表 + 空态 -->
+            <!-- 媒体服务器列表 + 空态 -->
             <FrameLayout
                 android:layout_width="match_parent"
                 android:layout_height="0dp"
                 android:layout_marginHorizontal="12dp"
-                android:layout_marginTop="4dp"
-                android:layout_weight="1">
-
-                <ListView
-                    android:id="@+id/listDevices"
-                    android:layout_width="match_parent"
-                    android:layout_height="match_parent"
-                    android:clipToPadding="false"
-                    android:divider="@null"
-                    android:dividerHeight="0dp"
-                    android:paddingBottom="8dp" />
-
-                <TextView
-                    android:id="@+id/tvEmpty"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_gravity="center"
-                    android:gravity="center"
-                    android:lineSpacingExtra="4dp"
-                    android:textColor="@color/text_faint"
-                    android:textSize="14sp"
-                    android:visibility="gone"
-                    tools:visibility="visible"
-                    tools:text="还没有发现设备\n点右上角「开始扫描」" />
-            </FrameLayout>
-        </LinearLayout>
-
-        <!-- ========== 页 2：媒体库（服务器 → 曲库浏览） ========== -->
-        <LinearLayout
-            android:id="@+id/pageLibrary"
-            android:layout_width="match_parent"
-            android:layout_height="match_parent"
-            android:orientation="vertical"
-            android:visibility="gone"
-            tools:visibility="gone">
-
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="16dp"
-                android:layout_marginTop="16dp"
-                android:layout_marginEnd="16dp"
-                android:text="@string/lib_title"
-                android:textColor="@color/text_primary"
-                android:textSize="18sp"
-                android:textStyle="bold" />
-
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginHorizontal="16dp"
-                android:layout_marginTop="2dp"
-                android:text="@string/lib_subtitle"
-                android:textColor="@color/text_secondary"
-                android:textSize="12sp" />
-
-            <FrameLayout
-                android:layout_width="match_parent"
-                android:layout_height="0dp"
-                android:layout_marginHorizontal="12dp"
-                android:layout_marginTop="8dp"
+                android:layout_marginTop="6dp"
                 android:layout_weight="1">
 
                 <ListView
@@ -235,7 +146,7 @@
             </FrameLayout>
         </LinearLayout>
 
-        <!-- ========== 页 3：正在播放（完整页） ========== -->
+        <!-- ========== 页 2：正在播放（完整页） ========== -->
         <FrameLayout
             android:id="@+id/pagePlay"
             android:layout_width="match_parent"
@@ -494,9 +405,66 @@
                 android:visibility="gone"
                 tools:visibility="visible" />
         </FrameLayout>
+
+        <!-- ========== 页 3：设置（预留，后续扩展） ========== -->
+        <LinearLayout
+            android:id="@+id/pageSettings"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:orientation="vertical"
+            android:visibility="gone"
+            tools:visibility="gone">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="16dp"
+                android:layout_marginTop="16dp"
+                android:layout_marginEnd="16dp"
+                android:text="设置"
+                android:textColor="@color/text_primary"
+                android:textSize="20sp"
+                android:textStyle="bold" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginHorizontal="12dp"
+                android:layout_marginTop="14dp"
+                android:background="@drawable/bg_row_card"
+                android:orientation="vertical"
+                android:paddingHorizontal="16dp"
+                android:paddingVertical="14dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="后续会在这里提供："
+                    android:textColor="@color/text_secondary"
+                    android:textSize="13sp" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:text="· 去广告（NO_ADS）\n· 服务器助手（建目录 / 整理）\n· 设备管理（收藏的服务器可长按管理）"
+                    android:lineSpacingExtra="4dp"
+                    android:textColor="@color/text_primary"
+                    android:textSize="14sp" />
+            </LinearLayout>
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginHorizontal="16dp"
+                android:layout_marginTop="18dp"
+                android:text="提示：在「媒体库」长按一台服务器，可以收藏置顶 / 重命名。"
+                android:textColor="@color/text_faint"
+                android:textSize="12sp" />
+        </LinearLayout>
     </FrameLayout>
 
-    <!-- ============ 迷你播放条（跨页常驻，点击进播放页） ============ -->
+    <!-- ============ 迷你播放条（非播放页常驻，点击进播放页） ============ -->
     <LinearLayout
         android:id="@+id/miniNowBar"
         android:layout_width="match_parent"
@@ -570,7 +538,7 @@
             android:tint="@color/text_primary" />
     </LinearLayout>
 
-    <!-- ============ 底部导航 ============ -->
+    <!-- ============ 底部导航：媒体库 / 播放 / 设置 ============ -->
     <com.google.android.material.bottomnavigation.BottomNavigationView
         android:id="@+id/bottomNav"
         android:layout_width="match_parent"

@@ -1,15 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <menu xmlns:android="http://schemas.android.com/apk/res/android">
     <item
-        android:id="@+id/nav_playing"
-        android:icon="@drawable/ic_tab_playing"
-        android:title="@string/tab_playing" />
-    <item
         android:id="@+id/nav_library"
         android:icon="@drawable/ic_tab_library"
         android:title="@string/tab_library" />
     <item
-        android:id="@+id/nav_devices"
-        android:icon="@drawable/ic_tab_devices"
-        android:title="@string/tab_devices" />
+        android:id="@+id/nav_playing"
+        android:icon="@drawable/ic_tab_playing"
+        android:title="@string/tab_playing" />
+    <item
+        android:id="@+id/nav_settings"
+        android:icon="@drawable/ic_tab_settings"
+        android:title="@string/tab_settings" />
 </menu>

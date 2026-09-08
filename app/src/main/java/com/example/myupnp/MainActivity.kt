@@ -63,18 +63,16 @@ class MainActivity : AppCompatActivity() {
     private val vm: MainViewModel by viewModels()
 
     private lateinit var tvStatus: TextView
-    private lateinit var tvDeviceTitle: TextView
-    private lateinit var listDevices: ListView
     private lateinit var btnStart: Button
     private lateinit var btnStop: Button
 
-    // ===== 三页结构（播放 / 媒体库 / 设备）+ 底部导航 =====
-    private lateinit var pageDevices: View
+    // ===== 三页结构（媒体库 / 播放 / 设置）+ 底部导航 =====
     private lateinit var pageLibrary: View
     private lateinit var pagePlay: View
+    private lateinit var pageSettings: View
     private lateinit var bottomNav: com.google.android.material.bottomnavigation.BottomNavigationView
-    private var lastTabBeforePlay = R.id.nav_devices
-    private var currentTabId = R.id.nav_devices
+    private var lastTabBeforePlay = R.id.nav_library
+    private var currentTabId = R.id.nav_library
 
     // ===== 正在播放：完整页 + 迷你条共用字段 =====
     private lateinit var nowPlayingBar: View        // 播放页里的内容面板
@@ -100,7 +98,6 @@ class MainActivity : AppCompatActivity() {
     private lateinit var btnNowNext: ImageButton
     private lateinit var tvNowQueue: TextView
     private lateinit var tvQueueEntry: TextView
-    private lateinit var tvEmpty: TextView
     private lateinit var imgNowArt: android.widget.ImageView
     private lateinit var tvNowMeta: TextView
     private var lastArtUrl: String? = null // 已加载封面的地址（避免重复下载）
@@ -125,9 +122,6 @@ class MainActivity : AppCompatActivity() {
     private val nowSession: NowPlayingSession get() = vm.nowSession
     private val subManager: SubscriptionManager get() = vm.subManager
     private val discovery: SsdpDiscovery get() = vm.discovery
-
-    private val deviceItems = ArrayList<DeviceListItem>()
-    private lateinit var adapter: DeviceListAdapter
 
     // ------------------------------------------------------------------
     // A2：Wi-Fi 变化 —— 系统回调在此注册/注销（生命周期绑定），
@@ -193,36 +187,9 @@ class MainActivity : AppCompatActivity() {
         }
 
         tvStatus = findViewById(R.id.tvStatus)
-        tvDeviceTitle = findViewById(R.id.tvDeviceTitle)
         tvQueueEntry = findViewById(R.id.tvQueueEntry)
-        tvEmpty = findViewById(R.id.tvEmpty)
-        listDevices = findViewById(R.id.listDevices)
         btnStart = findViewById(R.id.btnStart)
         btnStop = findViewById(R.id.btnStop)
-
-        adapter = DeviceListAdapter(this, deviceItems)
-        listDevices.adapter = adapter
-
-        // ---- 第 2~4 课：点设备 -> 选择场景（播放器/服务） ----
-        listDevices.setOnItemClickListener { _, _, position, _ ->
-            val item = adapter.getItem(position) as? DeviceListItem.DeviceItem
-                ?: return@setOnItemClickListener // 分组标题不可点
-            val entry = registry[item.entryKey] ?: return@setOnItemClickListener
-            val device = entry.device
-            if (device == null) {
-                Toast.makeText(this, "设备描述还没加载成功，无法操作", Toast.LENGTH_SHORT).show()
-                return@setOnItemClickListener
-            }
-            showDeviceActions(entry, device)
-        }
-        // 第 7 课 E：长按设备 -> 设备管理（收藏 / 重命名）
-        listDevices.setOnItemLongClickListener { _, _, position, _ ->
-            val item = adapter.getItem(position) as? DeviceListItem.DeviceItem
-                ?: return@setOnItemLongClickListener false
-            val entry = registry[item.entryKey] ?: return@setOnItemLongClickListener false
-            showDeviceManageDialog(entry, entry.device)
-            true
-        }
 
         btnStart.setOnClickListener {
             if (discovery.isRunning()) return@setOnClickListener
@@ -237,14 +204,11 @@ class MainActivity : AppCompatActivity() {
             }
         }
         btnStop.setOnClickListener { stopScanning() }
-        findViewById<Button>(R.id.btnClear).setOnClickListener {
-            vm.clearAllDevices()
-        }
 
         // ===== 三页 + 底部导航 + 播放页/迷你条 视图 =====
-        pageDevices = findViewById(R.id.pageDevices)
         pageLibrary = findViewById(R.id.pageLibrary)
         pagePlay = findViewById(R.id.pagePlay)
+        pageSettings = findViewById(R.id.pageSettings)
         bottomNav = findViewById(R.id.bottomNav)
         nowPlayingBar = findViewById(R.id.nowPlayingBar)
         tvPlayEmpty = findViewById(R.id.tvPlayEmpty)
@@ -371,7 +335,7 @@ class MainActivity : AppCompatActivity() {
         }
         listLibrary.setOnItemLongClickListener { _, _, p, _ ->
             val entry = libraryServers.getOrNull(p)?.first ?: return@setOnItemLongClickListener false
-            showDeviceInfoDialog(entry)
+            showDeviceManageDialog(entry, entry.device)
             true
         }
 
@@ -381,10 +345,10 @@ class MainActivity : AppCompatActivity() {
             true
         }
         refreshLibraryRows() // 提前准备好媒体服务器列表
-        showPage(pageDevices)
+        showPage(pageLibrary)
 
         // ===== MVVM：UI 观察 ViewModel 状态（第 1+2 批） =====
-        // 通用 UI 状态：扫描按钮/状态栏/计数/正在播放控制条
+        // 通用 UI 状态：扫描按钮/状态栏/正在播放控制条
         lifecycleScope.launch {
             vm.uiState.collect { s ->
                 // 扫描开关（开始/停止互斥显示）
@@ -394,18 +358,6 @@ class MainActivity : AppCompatActivity() {
                     tvStatus.text = s.statusOverride
                 } else if (s.statusText != null) {
                     tvStatus.setText(s.statusText)
-                }
-                // 设备标题计数
-                tvDeviceTitle.text =
-                    getString(R.string.device_title) + "  (${s.deviceCount})" +
-                        if (s.deviceCount > 0) "　长按=收藏/重命名" else ""
-                // 空态：没设备时显示引导
-                if (s.deviceCount == 0) {
-                    tvEmpty.visibility = View.VISIBLE
-                    tvEmpty.text = if (s.scanning) "正在扫描附近的设备…\n请稍候"
-                    else "还没有发现设备\n点右上角「开始扫描」\n（音箱/电视/媒体服务器需在同一 Wi-Fi）"
-                } else {
-                    tvEmpty.visibility = View.GONE
                 }
                 // 首页队列入口：队列有内容才显示（没在播放也能点开）
                 if (s.queueHasItems) {
@@ -473,13 +425,10 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }
-        // 设备列表行（由 registry.listener → VM.deviceRows 驱动）
+        // 设备表变化 → 顺带刷新媒体库页的服务器列表
         lifecycleScope.launch {
-            vm.deviceRows.collect { rows ->
-                deviceItems.clear()
-                deviceItems.addAll(rows)
-                adapter.notifyDataSetChanged()
-                refreshLibraryRows() // 媒体库页的服务器列表跟着设备表刷新
+            vm.deviceRows.collect {
+                refreshLibraryRows()
             }
         }
         // 一次性消息（订阅/退订等提示）
@@ -944,7 +893,7 @@ class MainActivity : AppCompatActivity() {
                 refreshLibraryRows()
                 showPage(pageLibrary)
             }
-            else -> showPage(pageDevices)
+            else -> showPage(pageSettings)
         }
         refreshMiniBar()
     }
@@ -953,7 +902,7 @@ class MainActivity : AppCompatActivity() {
     private fun showPage(target: View) {
         pagePlay.visibility = if (target === pagePlay) View.VISIBLE else View.GONE
         pageLibrary.visibility = if (target === pageLibrary) View.VISIBLE else View.GONE
-        pageDevices.visibility = if (target === pageDevices) View.VISIBLE else View.GONE
+        pageSettings.visibility = if (target === pageSettings) View.VISIBLE else View.GONE
     }
 
     /** 迷你条只在「有在播 且 不在播放页」时显示（播放页里它多余） */

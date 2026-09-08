@@ -13,6 +13,7 @@
     <!-- 底部导航 -->
     <string name="tab_playing">播放</string>
     <string name="tab_library">媒体库</string>
+    <string name="tab_settings">设置</string>
     <string name="tab_devices">设备</string>
 
     <!-- 播放页空态 -->
