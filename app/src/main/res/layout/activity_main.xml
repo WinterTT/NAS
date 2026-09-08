@@ -176,14 +176,6 @@
                 android:visibility="gone"
                 tools:visibility="visible">
 
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp"
-                    android:text="@string/swipe_hint"
-                    android:textColor="@color/text_faint"
-                    android:textSize="11sp" />
-
                 <ImageView
                     android:id="@+id/imgNowArt"
                     android:layout_width="240dp"

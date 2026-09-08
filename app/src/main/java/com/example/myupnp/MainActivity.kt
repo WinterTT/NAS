@@ -251,24 +251,6 @@ class MainActivity : AppCompatActivity() {
         // 迷你条（非按钮区域）点击 -> 打开播放页
         miniNowBar.setOnClickListener { switchTab(R.id.nav_playing) }
 
-        // 播放页下滑收起（回上一 Tab）
-        var swipeX = 0f
-        var swipeY = 0f
-        pagePlay.setOnTouchListener { _, e ->
-            when (e.actionMasked) {
-                android.view.MotionEvent.ACTION_DOWN -> {
-                    swipeX = e.x
-                    swipeY = e.y
-                }
-                android.view.MotionEvent.ACTION_UP -> {
-                    if (e.y - swipeY > 160 && kotlin.math.abs(e.x - swipeX) < 140) {
-                        switchTab(lastTabBeforePlay)
-                    }
-                }
-            }
-            false
-        }
-
         // 音量滑杆：拖动实时更新数字，松手发 SetVolume
         seekVol.setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(bar: android.widget.SeekBar?, progress: Int, fromUser: Boolean) {
