@@ -68,6 +68,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     /** 设备级用户数据（第 7 课 E：收藏/别名，持久化） */
     val bookmarks = DeviceBookmarks(getApplication())
 
+    /** 播放历史（第 7 课 D：最近播放，持久化） */
+    val playHistory = PlayHistory(getApplication())
+
     // ------------------------------------------------------------------
     // 设备/订阅/播放状态对象
     // ------------------------------------------------------------------
@@ -453,6 +456,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val queueCurrentTitle: String = "",
         /** 播放队列：是否已有内容（决定首页"队列入口"显不显示） */
         val queueHasItems: Boolean = false,
+        /** 播放历史：记录条数（有内容时显示"最近播放"入口） */
+        val historyCount: Int = 0,
     )
 
     private val _uiState = MutableStateFlow(UiState())
@@ -778,6 +783,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         album = item.album,
                         artUrl = item.artUrl
                     )
+                    noteHistoryPlayed(item) // 第 7 课 D：连播/下一首也算进"最近播放"
                     postMessage("▶ 正在播放：《${item.title}》")
                 } else {
                     postMessage(
@@ -787,6 +793,34 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
         }
+    }
+
+    // ------------------------------------------------------------------
+    // 第 7 课 D：播放历史（最近播放，持久化到 PlayHistory）
+    // ------------------------------------------------------------------
+
+    /** 推送成功后记录进"最近播放"（UI 重播需要还原成 MediaItem 再走选设备流程） */
+    fun noteHistoryPlayed(item: MediaItem) {
+        playHistory.push(
+            title = item.title,
+            resUrl = item.resUrl,
+            artist = item.artist,
+            album = item.album,
+            artUrl = item.artUrl
+        )
+        _uiState.update { it.copy(historyCount = playHistory.size) }
+    }
+
+    fun historyEntries(): List<PlayHistory.Entry> = playHistory.entries()
+
+    fun historyRemoveAt(position: Int) {
+        playHistory.removeAt(position)
+        _uiState.update { it.copy(historyCount = playHistory.size) }
+    }
+
+    fun historyClear() {
+        playHistory.clear()
+        _uiState.update { it.copy(historyCount = 0) }
     }
 
     // ------------------------------------------------------------------

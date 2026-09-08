@@ -114,6 +114,26 @@
                 android:visibility="gone"
                 tools:visibility="gone" />
 
+            <!-- 最近播放入口（第 7 课 D，有记录才显示） -->
+            <TextView
+                android:id="@+id/tvRecentEntry"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginHorizontal="12dp"
+                android:layout_marginTop="8dp"
+                android:background="@drawable/bg_row_card"
+                android:drawableStart="@drawable/ic_history"
+                android:drawablePadding="6dp"
+                android:drawableTint="@color/text_secondary"
+                android:gravity="center_vertical"
+                android:paddingHorizontal="12dp"
+                android:paddingVertical="8dp"
+                android:text="最近播放"
+                android:textColor="@color/text_primary"
+                android:textSize="12sp"
+                android:visibility="gone"
+                tools:visibility="gone" />
+
             <!-- 媒体服务器列表 + 空态 -->
             <FrameLayout
                 android:layout_width="match_parent"

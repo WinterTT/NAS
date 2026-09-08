@@ -98,6 +98,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var btnNowNext: ImageButton
     private lateinit var tvNowQueue: TextView
     private lateinit var tvQueueEntry: TextView
+    private lateinit var tvRecentEntry: TextView
     private lateinit var imgNowArt: android.widget.ImageView
     private lateinit var tvNowMeta: TextView
     private var lastArtUrl: String? = null // 已加载封面的地址（避免重复下载）
@@ -188,6 +189,7 @@ class MainActivity : AppCompatActivity() {
 
         tvStatus = findViewById(R.id.tvStatus)
         tvQueueEntry = findViewById(R.id.tvQueueEntry)
+        tvRecentEntry = findViewById(R.id.tvRecentEntry)
         btnStart = findViewById(R.id.btnStart)
         btnStop = findViewById(R.id.btnStop)
 
@@ -248,6 +250,8 @@ class MainActivity : AppCompatActivity() {
         // 队列
         tvNowQueue.setOnClickListener { showQueueDialog() }
         tvQueueEntry.setOnClickListener { showQueueDialog() }
+        // 最近播放（第 7 课 D）
+        tvRecentEntry.setOnClickListener { showHistoryDialog() }
         // 迷你条（非按钮区域）点击 -> 打开播放页
         miniNowBar.setOnClickListener { switchTab(R.id.nav_playing) }
 
@@ -353,6 +357,13 @@ class MainActivity : AppCompatActivity() {
                     }
                 } else {
                     tvQueueEntry.visibility = View.GONE
+                }
+                // 最近播放（第 7 课 D）：有记录才显示入口
+                if (s.historyCount > 0) {
+                    tvRecentEntry.visibility = View.VISIBLE
+                    tvRecentEntry.text = "最近播放（${s.historyCount}）—— 点此重播 / 清空"
+                } else {
+                    tvRecentEntry.visibility = View.GONE
                 }
                 // 正在播放：迷你条 + 播放页内容 同步渲染
                 val meta = listOf(s.nowPlayingArtist, s.nowPlayingAlbum)
@@ -796,6 +807,43 @@ class MainActivity : AppCompatActivity() {
         btnRefresh.setOnClickListener { refresh() }
     }
 
+    /** 最近播放列表（第 7 课 D）：点一首 = 重播（走选设备流程） */
+    private fun showHistoryDialog() {
+        val list = vm.historyEntries()
+        if (list.isEmpty()) {
+            Toast.makeText(this, "还没有播放记录", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val rows = ArrayList<String>()
+        for ((i, e) in list.withIndex()) {
+            val suffix = listOf(e.artist, e.album).filter { it.isNotBlank() }
+                .joinToString(" · ")
+            rows += if (suffix.isNotEmpty()) "${i + 1}. ${e.title}（$suffix）" else "${i + 1}. ${e.title}"
+        }
+        AlertDialog.Builder(this)
+            .setTitle("最近播放")
+            .setItems(rows.toTypedArray()) { _, which ->
+                list.getOrNull(which)?.let { replayHistoryEntry(it) }
+            }
+            .setNeutralButton("清空历史") { _, _ -> vm.historyClear() }
+            .setNegativeButton("关闭", null)
+            .show()
+    }
+
+    /** 把一条历史记录还原成 MediaItem，走"选设备播放"重播 */
+    private fun replayHistoryEntry(e: PlayHistory.Entry) {
+        playMediaItemFromServer(
+            MediaItem(
+                id = e.resUrl,
+                title = e.title,
+                resUrl = e.resUrl,
+                artist = e.artist,
+                album = e.album,
+                artUrl = e.artUrl
+            )
+        )
+    }
+
     /** 队列总览：正在播 + 接下来 N 首；点待播一首 = 立即切到它 */
     private fun showQueueDialog() {
         val queue = vm.playbackQueue
@@ -1033,6 +1081,8 @@ class MainActivity : AppCompatActivity() {
                     )
                     // 记入播放队列的"当前这首"（排队的歌会在播完后自动接上）
                     vm.queueOnPlayed(item)
+                    // 第 7 课 D：曲库推送成功 -> 记入"最近播放"
+                    vm.noteHistoryPlayed(item)
                     Toast.makeText(this, "已推送给 $targetName 播放", Toast.LENGTH_SHORT).show()
                     // 操作了这台设备 -> 自动订阅其全部服务（之后别处操作也能同步）
                     vm.activateDeviceSubscription(deviceKey, device.services)
@@ -1157,12 +1207,17 @@ class MainActivity : AppCompatActivity() {
                 // 推送成功后：建立播放会话 + 自动订阅该设备全部服务
                 if (results.lastOrNull()?.second?.success == true) {
                     mainHandler.post {
+                        val pushedTitle = url.substringAfterLast('/').ifEmpty { url }
                         setNowPlaying(
                             deviceName = deviceName,
                             avt = renderer,
                             rc = rc,
-                            title = url.substringAfterLast('/').ifEmpty { url },
+                            title = pushedTitle,
                             deviceKey = deviceKey
+                        )
+                        // 第 7 课 D：裸 URL 播放也算进"最近播放"
+                        vm.noteHistoryPlayed(
+                            MediaItem(id = url, title = pushedTitle, resUrl = url)
                         )
                         vm.activateDeviceSubscription(deviceKey, device.services)
                     }
