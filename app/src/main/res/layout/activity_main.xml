@@ -233,11 +233,12 @@
                 <FrameLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:gravity="center">
+                    android:gravity="center_horizontal">
                     <ImageView
                         android:id="@+id/imgNowArt"
                         android:layout_width="260dp"
                         android:layout_height="260dp"
+                        android:layout_gravity="center"
                         android:background="@drawable/bg_art_round_lg"
                         android:clipToOutline="true"
                         android:contentDescription="专辑封面"
