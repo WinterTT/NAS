@@ -17,11 +17,11 @@
     <string name="tab_devices">设备</string>
 
     <!-- 播放页空态 -->
-    <string name="play_page_empty">还没有正在播放的歌曲\n从「媒体库」或「设备」里挑一首推过来吧</string>
+    <string name="play_page_empty">还没有正在播放的歌曲\n去「媒体库」挑一首推过来吧\n（媒体服务器或手机里的本地文件都行）</string>
 
     <!-- 媒体库页 -->
-    <string name="lib_title">媒体服务器</string>
-    <string name="lib_subtitle">点一台服务器浏览它的曲库</string>
-    <string name="lib_empty">还没发现媒体服务器\n请先在「设备」页点「开始扫描」，然后回到这里</string>
+    <string name="lib_title">媒体库</string>
+    <string name="lib_subtitle">找到的媒体服务器，点开就能翻曲库</string>
+    <string name="lib_empty">还没有发现媒体服务器\n先点右上角「开始扫描」\n（手机需与服务器在同一 Wi-Fi）</string>
     <string name="swipe_hint">下滑收起本页</string>
 </resources>

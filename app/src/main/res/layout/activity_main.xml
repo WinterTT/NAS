@@ -94,63 +94,64 @@
                 android:textColor="@color/text_faint"
                 android:textSize="12sp" />
 
-            <!-- 本地文件推送入口（第 7 课 B） -->
-            <TextView
-                android:id="@+id/tvLocalPush"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginHorizontal="12dp"
-                android:layout_marginTop="10dp"
-                android:background="@drawable/bg_row_card"
-                android:drawableStart="@drawable/ic_local"
-                android:drawablePadding="6dp"
-                android:drawableTint="@color/text_secondary"
-                android:gravity="center_vertical"
-                android:paddingHorizontal="12dp"
-                android:paddingVertical="8dp"
-                android:text="推本地文件（手机里的音乐 / 视频）"
-                android:textColor="@color/text_primary"
-                android:textSize="12sp" />
-
-            <!-- 播放队列入口（没在播放也能点开队列） -->
-            <TextView
-                android:id="@+id/tvQueueEntry"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginHorizontal="12dp"
-                android:layout_marginTop="10dp"
-                android:background="@drawable/bg_row_card"
-                android:drawableStart="@drawable/ic_queue"
-                android:drawablePadding="6dp"
-                android:drawableTint="@color/text_secondary"
-                android:gravity="center_vertical"
-                android:paddingHorizontal="12dp"
-                android:paddingVertical="8dp"
-                android:text="播放队列"
-                android:textColor="@color/text_primary"
-                android:textSize="12sp"
-                android:visibility="gone"
-                tools:visibility="gone" />
-
-            <!-- 最近播放入口（第 7 课 D，有记录才显示） -->
-            <TextView
-                android:id="@+id/tvRecentEntry"
+            <!-- 快捷入口：本地文件 / 队列 / 最近播放 -->
+            <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginHorizontal="12dp"
                 android:layout_marginTop="8dp"
-                android:background="@drawable/bg_row_card"
-                android:drawableStart="@drawable/ic_history"
-                android:drawablePadding="6dp"
-                android:drawableTint="@color/text_secondary"
-                android:gravity="center_vertical"
-                android:paddingHorizontal="12dp"
-                android:paddingVertical="8dp"
-                android:text="最近播放"
-                android:textColor="@color/text_primary"
-                android:textSize="12sp"
-                android:visibility="gone"
-                tools:visibility="gone" />
+                android:orientation="horizontal">
+
+                <androidx.appcompat.widget.AppCompatButton
+                    android:id="@+id/btnPushLocal"
+                    android:layout_width="0dp"
+                    android:layout_height="36dp"
+                    android:layout_marginEnd="4dp"
+                    android:layout_weight="1"
+                    android:background="@drawable/bg_pill_ghost"
+                    android:minWidth="0dp"
+                    android:paddingStart="4dp"
+                    android:paddingEnd="4dp"
+                    android:stateListAnimator="@null"
+                    android:text="本地文件"
+                    android:textAllCaps="false"
+                    android:textColor="@color/text_primary"
+                    android:textSize="12sp" />
+
+                <androidx.appcompat.widget.AppCompatButton
+                    android:id="@+id/btnQueueQuick"
+                    android:layout_width="0dp"
+                    android:layout_height="36dp"
+                    android:layout_marginHorizontal="4dp"
+                    android:layout_weight="1"
+                    android:background="@drawable/bg_pill_ghost"
+                    android:minWidth="0dp"
+                    android:paddingStart="4dp"
+                    android:paddingEnd="4dp"
+                    android:stateListAnimator="@null"
+                    android:text="队列(0)"
+                    android:textAllCaps="false"
+                    android:textColor="@color/text_primary"
+                    android:textSize="12sp" />
+
+                <androidx.appcompat.widget.AppCompatButton
+                    android:id="@+id/btnRecentQuick"
+                    android:layout_width="0dp"
+                    android:layout_height="36dp"
+                    android:layout_marginStart="4dp"
+                    android:layout_weight="1"
+                    android:background="@drawable/bg_pill_ghost"
+                    android:minWidth="0dp"
+                    android:paddingStart="4dp"
+                    android:paddingEnd="4dp"
+                    android:stateListAnimator="@null"
+                    android:text="最近(0)"
+                    android:textAllCaps="false"
+                    android:textColor="@color/text_primary"
+                    android:textSize="12sp"
+                    android:visibility="gone"
+                    tools:visibility="visible" />
+            </LinearLayout>
 
             <!-- 媒体服务器列表 + 空态 -->
             <FrameLayout

@@ -99,9 +99,9 @@ class MainActivity : AppCompatActivity() {
     private lateinit var btnNowPrev: ImageButton
     private lateinit var btnNowNext: ImageButton
     private lateinit var tvNowQueue: TextView
-    private lateinit var tvQueueEntry: TextView
-    private lateinit var tvRecentEntry: TextView
-    private lateinit var tvLocalPush: TextView
+    private lateinit var btnPushLocal: Button
+    private lateinit var btnQueueQuick: Button
+    private lateinit var btnRecentQuick: Button
     private lateinit var imgNowArt: android.widget.ImageView
     private lateinit var tvNowMeta: TextView
     private var lastArtUrl: String? = null // 已加载封面的地址（避免重复下载）
@@ -197,9 +197,9 @@ class MainActivity : AppCompatActivity() {
         }
 
         tvStatus = findViewById(R.id.tvStatus)
-        tvQueueEntry = findViewById(R.id.tvQueueEntry)
-        tvRecentEntry = findViewById(R.id.tvRecentEntry)
-        tvLocalPush = findViewById(R.id.tvLocalPush)
+        btnPushLocal = findViewById(R.id.btnPushLocal)
+        btnQueueQuick = findViewById(R.id.btnQueueQuick)
+        btnRecentQuick = findViewById(R.id.btnRecentQuick)
         btnStart = findViewById(R.id.btnStart)
         btnStop = findViewById(R.id.btnStop)
 
@@ -259,11 +259,11 @@ class MainActivity : AppCompatActivity() {
         btnNowNext.setOnClickListener { vm.queueNextItem() }
         // 队列
         tvNowQueue.setOnClickListener { showQueueDialog() }
-        tvQueueEntry.setOnClickListener { showQueueDialog() }
+        btnQueueQuick.setOnClickListener { showQueueDialog() }
         // 最近播放（第 7 课 D）
-        tvRecentEntry.setOnClickListener { showHistoryDialog() }
+        btnRecentQuick.setOnClickListener { showHistoryDialog() }
         // 本地文件推送（第 7 课 B）
-        tvLocalPush.setOnClickListener {
+        btnPushLocal.setOnClickListener {
             localFileLauncher.launch(arrayOf("audio/*", "video/*", "image/*"))
         }
         // 迷你条（非按钮区域）点击 -> 打开播放页
@@ -360,25 +360,13 @@ class MainActivity : AppCompatActivity() {
                 } else if (s.statusText != null) {
                     tvStatus.setText(s.statusText)
                 }
-                // 首页队列入口：队列有内容才显示（没在播放也能点开）
-                if (s.queueHasItems) {
-                    tvQueueEntry.visibility = View.VISIBLE
-                    tvQueueEntry.text = buildString {
-                        append("播放队列：")
-                        if (s.queuePendingCount > 0) append("待播 ${s.queuePendingCount} 首，")
-                        if (s.queueCurrentTitle.isNotEmpty()) append("当前《${s.queueCurrentTitle}》")
-                        else append("当前无")
-                        append(" —— 点此查看/切歌")
-                    }
-                } else {
-                    tvQueueEntry.visibility = View.GONE
-                }
-                // 最近播放（第 7 课 D）：有记录才显示入口
+                // 快捷入口：队列 / 最近播放（有记录才显示"最近"）
+                btnQueueQuick.text = "队列(${s.queuePendingCount})"
                 if (s.historyCount > 0) {
-                    tvRecentEntry.visibility = View.VISIBLE
-                    tvRecentEntry.text = "最近播放（${s.historyCount}）—— 点此重播 / 清空"
+                    btnRecentQuick.visibility = View.VISIBLE
+                    btnRecentQuick.text = "最近(${s.historyCount})"
                 } else {
-                    tvRecentEntry.visibility = View.GONE
+                    btnRecentQuick.visibility = View.GONE
                 }
                 // 正在播放：迷你条 + 播放页内容 同步渲染
                 val meta = listOf(s.nowPlayingArtist, s.nowPlayingAlbum)
