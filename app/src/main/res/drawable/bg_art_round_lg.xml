@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 播放页大封面的圆角裁剪底 -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="@color/now_bar_button_disabled" />
+    <corners android:radius="22dp" />
+</shape>
