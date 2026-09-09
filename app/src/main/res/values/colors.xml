@@ -25,4 +25,12 @@
     <color name="now_bar_text">#FF1C1C1E</color>
     <color name="now_bar_subtext">#FF5F6368</color>
     <color name="now_bar_button_disabled">#FF9AA0A6</color>
+
+    <!-- ================================================================
+         播放页专属深色（参考主流音乐 App：不受系统深浅色影响，始终沉浸深色）
+         ================================================================ -->
+    <color name="player_bg">#FF0B0E12</color>
+    <color name="player_text">#FFF2F3F5</color>
+    <color name="player_subtext">#FFB3B9C2</color>
+    <color name="player_faint">#FF767D87</color>
 </resources>

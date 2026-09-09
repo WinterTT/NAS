@@ -397,7 +397,13 @@ class MainActivity : AppCompatActivity() {
                         seekNow.progress = s.positionSec.coerceIn(0, s.durationSec).toInt()
                     }
                     tvNowTime.text = fmtDuration(s.positionSec)
-                    tvNowDuration.text = fmtDuration(s.durationSec)
+                    // 右侧显示"剩余时间"，如 -4:49（与主流音乐 App 一致）
+                    tvNowDuration.text = if (s.durationSec > 0) {
+                        val rem = (s.durationSec - s.positionSec).coerceAtLeast(0)
+                        "-${fmtDuration(rem)}"
+                    } else {
+                        fmtDuration(s.durationSec)
+                    }
                     seekNow.isEnabled = s.seekable && s.nowPlayingDevice.isNotEmpty()
 
                     // 音量：滑杆 + 数字（有 RenderingControl 才显示整行）

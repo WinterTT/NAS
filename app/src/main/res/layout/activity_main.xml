@@ -185,20 +185,21 @@
             </FrameLayout>
         </LinearLayout>
 
-        <!-- ========== 页 2：正在播放（完整页） ========== -->
+        <!-- ========== 页 2：正在播放（完整页，参考主流音乐 App） ========== -->
         <FrameLayout
             android:id="@+id/pagePlay"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
+            android:background="@color/player_bg"
             android:visibility="gone"
             tools:visibility="visible">
 
-            <!-- 背景氛围（封面放大 + 透明） -->
+            <!-- 背景氛围（封面放大：模糊淡显于深色之上） -->
             <ImageView
                 android:id="@+id/imgGlow"
                 android:layout_width="match_parent"
                 android:layout_height="match_parent"
-                android:alpha="0.22"
+                android:alpha="0.55"
                 android:contentDescription="@null"
                 android:scaleType="centerCrop"
                 android:visibility="gone"
@@ -209,72 +210,79 @@
                 android:id="@+id/nowPlayingBar"
                 android:layout_width="match_parent"
                 android:layout_height="match_parent"
-                android:gravity="center_horizontal"
                 android:orientation="vertical"
-                android:paddingHorizontal="26dp"
+                android:padding="20dp"
                 android:visibility="gone"
                 tools:visibility="visible">
+
+                <!-- 顶部：正在播放到… -->
+                <TextView
+                    android:id="@+id/tvNowDevice"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="start"
+                    android:textColor="@color/player_faint"
+                    android:textSize="13sp" />
 
                 <Space
                     android:layout_width="1dp"
                     android:layout_height="0dp"
-                    android:layout_weight="0.7" />
+                    android:layout_weight="0.5" />
 
-                <!-- 设备名（顶部小字） -->
-                <TextView
-                    android:id="@+id/tvNowDevice"
-                    android:layout_width="wrap_content"
+                <!-- 大封面（居中） -->
+                <FrameLayout
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:textColor="@color/text_faint"
-                    android:textSize="12sp" />
+                    android:gravity="center">
+                    <ImageView
+                        android:id="@+id/imgNowArt"
+                        android:layout_width="260dp"
+                        android:layout_height="260dp"
+                        android:background="@drawable/bg_art_round_lg"
+                        android:clipToOutline="true"
+                        android:contentDescription="专辑封面"
+                        android:outlineProvider="background"
+                        android:scaleType="centerCrop"
+                        android:visibility="gone"
+                        tools:visibility="visible" />
+                </FrameLayout>
 
-                <!-- 大封面 -->
-                <ImageView
-                    android:id="@+id/imgNowArt"
-                    android:layout_width="250dp"
-                    android:layout_height="250dp"
-                    android:layout_marginTop="14dp"
-                    android:background="@drawable/bg_art_round_lg"
-                    android:clipToOutline="true"
-                    android:contentDescription="专辑封面"
-                    android:outlineProvider="background"
-                    android:scaleType="centerCrop"
-                    android:visibility="gone"
-                    tools:visibility="visible" />
-
-                <!-- 歌名 -->
+                <!-- 歌名（左对齐） -->
                 <TextView
                     android:id="@+id/tvNowTitle"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="22dp"
-                    android:ellipsize="marquee"
-                    android:gravity="center"
+                    android:ellipsize="end"
                     android:maxLines="1"
                     android:text="@string/now_playing_hint"
-                    android:textColor="@color/text_primary"
+                    android:textColor="@color/player_text"
                     android:textSize="21sp"
                     android:textStyle="bold" />
 
-                <!-- 歌手 · 专辑 -->
+                <!-- 歌手 · 专辑（左对齐） -->
                 <TextView
                     android:id="@+id/tvNowMeta"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="6dp"
                     android:ellipsize="end"
-                    android:gravity="center"
                     android:maxLines="1"
-                    android:textColor="@color/text_secondary"
-                    android:textSize="14sp"
+                    android:textColor="@color/player_subtext"
+                    android:textSize="15sp"
                     android:visibility="gone"
                     tools:visibility="visible" />
 
-                <!-- 进度 -->
+                <Space
+                    android:layout_width="1dp"
+                    android:layout_height="0dp"
+                    android:layout_weight="0.22" />
+
+                <!-- 时间条（左=已播，右=剩余） -->
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="16dp"
+                    android:layout_marginTop="10dp"
                     android:gravity="center_vertical"
                     android:orientation="horizontal">
 
@@ -282,10 +290,10 @@
                         android:id="@+id/tvNowTime"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:minWidth="38dp"
+                        android:minWidth="40dp"
                         android:gravity="center"
                         android:text="0:00"
-                        android:textColor="@color/text_secondary"
+                        android:textColor="@color/player_faint"
                         android:textSize="12sp" />
 
                     <SeekBar
@@ -301,10 +309,10 @@
                         android:id="@+id/tvNowDuration"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:minWidth="38dp"
-                        android:gravity="center"
+                        android:minWidth="44dp"
+                        android:gravity="end"
                         android:text="0:00"
-                        android:textColor="@color/text_secondary"
+                        android:textColor="@color/player_faint"
                         android:textSize="12sp" />
                 </LinearLayout>
 
@@ -313,7 +321,7 @@
                     android:id="@+id/volRow"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="0dp"
+                    android:layout_marginTop="2dp"
                     android:gravity="center_vertical"
                     android:orientation="horizontal"
                     android:visibility="gone"
@@ -324,7 +332,7 @@
                         android:layout_height="16dp"
                         android:contentDescription="@null"
                         android:src="@drawable/ic_vol_down"
-                        android:tint="@color/text_faint" />
+                        android:tint="@color/player_faint" />
 
                     <SeekBar
                         android:id="@+id/seekVol"
@@ -341,9 +349,9 @@
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:gravity="center_vertical"
-                        android:minWidth="24dp"
+                        android:minWidth="28dp"
                         android:text="--"
-                        android:textColor="@color/text_secondary"
+                        android:textColor="@color/player_subtext"
                         android:textSize="12sp" />
                 </LinearLayout>
 
@@ -351,7 +359,7 @@
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="10dp"
+                    android:layout_marginTop="8dp"
                     android:gravity="center_vertical"
                     android:orientation="horizontal">
 
@@ -362,18 +370,18 @@
 
                     <ImageButton
                         android:id="@+id/btnNowPrev"
-                        android:layout_width="52dp"
-                        android:layout_height="52dp"
+                        android:layout_width="56dp"
+                        android:layout_height="56dp"
                         android:background="?android:attr/selectableItemBackgroundBorderless"
                         android:contentDescription="上一首"
                         android:src="@drawable/ic_prev"
-                        android:tint="@color/text_primary" />
+                        android:tint="@color/player_text" />
 
                     <ImageButton
                         android:id="@+id/btnNowPlayPause"
-                        android:layout_width="76dp"
-                        android:layout_height="76dp"
-                        android:layout_marginHorizontal="22dp"
+                        android:layout_width="80dp"
+                        android:layout_height="80dp"
+                        android:layout_marginHorizontal="26dp"
                         android:background="@drawable/bg_circle_brand"
                         android:contentDescription="播放/暂停"
                         android:src="@drawable/ic_play"
@@ -381,12 +389,12 @@
 
                     <ImageButton
                         android:id="@+id/btnNowNext"
-                        android:layout_width="52dp"
-                        android:layout_height="52dp"
+                        android:layout_width="56dp"
+                        android:layout_height="56dp"
                         android:background="?android:attr/selectableItemBackgroundBorderless"
                         android:contentDescription="下一首"
                         android:src="@drawable/ic_next"
-                        android:tint="@color/text_primary" />
+                        android:tint="@color/player_text" />
 
                     <Space
                         android:layout_width="0dp"
@@ -410,24 +418,24 @@
                         android:paddingHorizontal="16dp"
                         android:paddingVertical="6dp"
                         android:text="队列(0)"
-                        android:textColor="@color/text_primary"
+                        android:textColor="@color/player_text"
                         android:textSize="13sp" />
 
                     <ImageButton
                         android:id="@+id/btnNowStop"
-                        android:layout_width="36dp"
-                        android:layout_height="36dp"
+                        android:layout_width="40dp"
+                        android:layout_height="40dp"
                         android:layout_marginStart="14dp"
                         android:background="?android:attr/selectableItemBackgroundBorderless"
                         android:contentDescription="停止"
                         android:src="@drawable/ic_stop"
-                        android:tint="@color/text_faint" />
+                        android:tint="@color/player_faint" />
                 </LinearLayout>
 
                 <Space
                     android:layout_width="1dp"
                     android:layout_height="0dp"
-                    android:layout_weight="0.8" />
+                    android:layout_weight="0.2" />
             </LinearLayout>
 
             <!-- 空态（没有会话时整页提示） -->
@@ -439,7 +447,7 @@
                 android:gravity="center"
                 android:lineSpacingExtra="4dp"
                 android:text="@string/play_page_empty"
-                android:textColor="@color/text_faint"
+                android:textColor="@color/player_faint"
                 android:textSize="14sp"
                 android:visibility="gone"
                 tools:visibility="visible" />
