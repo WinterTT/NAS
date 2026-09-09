@@ -724,75 +724,109 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
-    /** 曲库里点歌：弹出"选设备播放"框（可刷新设备列表，设备没找到也能重扫） */
+    /** 曲库里点歌：弹出"选设备播放"框（上次用过的置顶、可一键；长按=收藏/重命名） */
     private fun playMediaItemFromServer(item: MediaItem) {
         if (item.resUrl.isBlank()) {
             Toast.makeText(this, "该条目没有可播放地址(res)", Toast.LENGTH_SHORT).show()
             return
         }
 
-        // 对话框里的数据源：发现到的播放器 (设备, AVTransport 服务)
-        val pairs = mutableListOf<Pair<Entry, UpnpService>>()
-        val names = mutableListOf<String>()
+        val pairs = ArrayList<Pair<Entry, UpnpService>>()
+        val names = ArrayList<String>()
         var listAdapter: ArrayAdapter<String>? = null
+        var quickButton: Button? = null
+        var dialog: AlertDialog? = null
+        val lastKey = vm.lastRendererKey()
+
+        fun labelOf(e: Entry): String {
+            val d = e.device ?: return "（设备信息未就绪）"
+            val star = if (vm.isFavoriteEntry(e)) "⭐ " else ""
+            val last = if (lastKey != null && vm.rendererKeyOf(d, e.location) == lastKey) "  · 上次" else ""
+            return "$star📺 ${vm.shownNameOf(e)}$last  ${d.modelName}"
+        }
 
         fun collectRenderers() {
             pairs.clear()
             names.clear()
-            // 收藏的设备排前面，显示用别名（第 7 课 E）
+            val tmp = ArrayList<Pair<Entry, UpnpService>>()
             for (e in vm.deviceEntriesFavoritesFirst()) {
                 val d = e.device ?: continue
                 val avt = DlnaPlayer.avTransportOf(d) ?: continue
-                pairs.add(e to avt)
-                val star = if (vm.isFavoriteEntry(e)) "⭐ " else ""
-                val tag = "$star📺 ${vm.shownNameOf(e)}  ${d.modelName}"
-                names.add(tag)
+                tmp.add(e to avt)
+            }
+            // 排序：收藏最前 → 上次用过的其次 → 其余按发现顺序
+            tmp.sortWith(
+                compareBy(
+                    { !vm.isFavoriteEntry(it.first) },
+                    {
+                        if (lastKey != null &&
+                            vm.rendererKeyOf(it.first.device, it.first.location) == lastKey
+                        ) 0 else 1
+                    }
+                )
+            )
+            pairs.addAll(tmp)
+            for ((e, _) in pairs) names.add(labelOf(e))
+        }
+
+        fun lastIndex(): Int =
+            pairs.indexOfFirst { (e, _) ->
+                lastKey != null && vm.rendererKeyOf(e.device, e.location) == lastKey
+            }
+
+        fun refreshQuick() {
+            val label = if (lastIndex() >= 0) "▶ 推给上次：${vm.shownNameOf(pairs[lastIndex()].first)}" else null
+            quickButton?.let { btn ->
+                btn.visibility = if (label != null) View.VISIBLE else View.GONE
+                btn.text = label ?: ""
             }
         }
 
         fun pushSelected(index: Int) {
-            val (e, avt) = pairs[index]
+            val (e, avt) = pairs.getOrNull(index) ?: return
+            val d = e.device ?: return
             pushToRenderer(
                 renderer = avt,
-                deviceName = e.device!!.friendlyName,
-                rc = e.device!!.let { DlnaPlayer.renderingControlOf(it) },
+                deviceName = d.friendlyName,
+                rc = DlnaPlayer.renderingControlOf(d),
                 item = item,
-                device = e.device!!,
+                device = d,
                 deviceKey = e.location
             )
         }
 
-        // 刷新动作：触发引擎立即 M-SEARCH，1.5s 后（MX 内应答回到注册表）重取列表
         fun refresh() {
             vm.refreshDevicesNow()
             Toast.makeText(this, "正在搜索设备…", Toast.LENGTH_SHORT).show()
             mainHandler.postDelayed({
                 collectRenderers()
                 listAdapter?.notifyDataSetChanged()
-                if (pairs.isEmpty()) {
-                    Toast.makeText(this, "仍没找到可播放设备", Toast.LENGTH_SHORT).show()
-                }
+                refreshQuick()
+                if (pairs.isEmpty()) Toast.makeText(this, "仍没找到可播放设备", Toast.LENGTH_SHORT).show()
             }, 1_500L)
         }
 
-        // ---- 自绘对话框：可刷新 ListView + 底部按钮 ----
         collectRenderers()
 
-        // 单台设备时：不弹框，直接推（原行为），避免打断
+        // 单台设备时：不弹框，直接推（原行为）
         if (pairs.size == 1) {
             pushSelected(0)
             return
         }
 
-        // 空/多台都弹同一个框：空时列表空，靠"刷新"按钮找设备
-        // 注意：ListView 必须占固定权重高度（不能 wrap_content），
-        // 否则设备一多会把下方"刷新"按钮挤出对话框可视区。
+        val btnQuick = Button(this).apply {
+            visibility = if (lastIndex() >= 0) View.VISIBLE else View.GONE
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.brand))
+        }
+        quickButton = btnQuick
+        refreshQuick()
+
         val btnRefresh = Button(this).apply { text = "🔄 刷新设备列表" }
         val listView = ListView(this).apply {
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 0,
-                1f // weight=1：占满可用空间，按钮始终钉在底部
+                1f
             )
         }
         listAdapter = ArrayAdapter(this, android.R.layout.simple_list_item_1, names)
@@ -801,20 +835,44 @@ class MainActivity : AppCompatActivity() {
         val panel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(30, 8, 30, 4)
-            // 固定整个面板高度，避免 dialog 被列表撑满
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 px(460)
             )
+            addView(btnQuick)
             addView(listView)
             addView(btnRefresh)
         }
-        val dialog = AlertDialog.Builder(this)
+        dialog = AlertDialog.Builder(this)
             .setTitle("推送给哪台设备播放？")
             .setView(panel)
             .setNegativeButton("取消", null)
             .show()
-        listView.setOnItemClickListener { _, _, which, _ -> pushSelected(which); dialog.dismiss() }
+
+        listView.setOnItemClickListener { _, _, which, _ ->
+            dialog?.dismiss()
+            pushSelected(which)
+        }
+        listView.setOnItemLongClickListener { _, _, which, _ ->
+            val (e, _) = pairs.getOrNull(which) ?: return@setOnItemLongClickListener false
+            showDeviceManageDialog(e, e.device)
+            // 管理（收藏/重命名）后刷新标签与快速按钮
+            mainHandler.postDelayed({
+                collectRenderers()
+                listAdapter?.notifyDataSetChanged()
+                refreshQuick()
+            }, 200)
+            true
+        }
+        btnQuick.setOnClickListener {
+            val idx = lastIndex()
+            if (idx >= 0) {
+                dialog?.dismiss()
+                pushSelected(idx)
+            } else {
+                Toast.makeText(this, "上次的播放器已不在，请从下面选", Toast.LENGTH_SHORT).show()
+            }
+        }
         btnRefresh.setOnClickListener { refresh() }
     }
 
@@ -1193,6 +1251,8 @@ class MainActivity : AppCompatActivity() {
                     vm.queueOnPlayed(item)
                     // 第 7 课 D：曲库推送成功 -> 记入"最近播放"
                     vm.noteHistoryPlayed(item)
+                    // 记住"上次推给哪台设备"（下次默认）
+                    vm.rememberLastRenderer(vm.rendererKeyOf(device, deviceKey))
                     Toast.makeText(this, "已推送给 $targetName 播放", Toast.LENGTH_SHORT).show()
                     // 操作了这台设备 -> 自动订阅其全部服务（之后别处操作也能同步）
                     vm.activateDeviceSubscription(deviceKey, device.services)

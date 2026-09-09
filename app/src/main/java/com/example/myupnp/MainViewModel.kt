@@ -74,6 +74,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     /** 播放历史（第 7 课 D：最近播放，持久化） */
     val playHistory = PlayHistory(getApplication())
 
+    /** 上次推送选中的播放器（记住默认，下次优先） */
+    private val rendererPrefs =
+        getApplication<Application>().getSharedPreferences("renderer_memory", Context.MODE_PRIVATE)
+
+    /** 播放器稳定键：UDN 优先，回退 LOCATION（用于记住"上次用哪台"） */
+    fun rendererKeyOf(device: UpnpDevice?, location: String?): String =
+        device?.udn?.trim()?.takeIf { it.isNotBlank() } ?: location.orEmpty()
+
+    fun lastRendererKey(): String? = rendererPrefs.getString("last", null)
+
+    fun rememberLastRenderer(key: String) {
+        if (key.isBlank()) return
+        rendererPrefs.edit().putString("last", key).apply()
+    }
+
     // ------------------------------------------------------------------
     // 设备/订阅/播放状态对象
     // ------------------------------------------------------------------
