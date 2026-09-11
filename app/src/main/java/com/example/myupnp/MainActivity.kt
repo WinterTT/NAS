@@ -367,7 +367,7 @@ class MainActivity : AppCompatActivity() {
         }
         listSearchResults.adapter = searchAdapter
         listSearchResults.setOnItemClickListener { _, _, p, _ ->
-            searchItems.getOrNull(p)?.let { playMediaItemFromServer(it) }
+            searchItems.getOrNull(p)?.let { handleItemTap(it) }
         }
         listSearchResults.setOnItemLongClickListener { _, _, p, _ ->
             val target = searchItems.getOrNull(p) ?: return@setOnItemLongClickListener false
@@ -465,7 +465,7 @@ class MainActivity : AppCompatActivity() {
                     serverStage = 2
                     refreshServerRows()
                 }
-                is ServerRow.Song -> playMediaItemFromServer(row.item)
+                is ServerRow.Song -> handleItemTap(row.item)
                 null -> Unit
             }
         }
@@ -1224,9 +1224,34 @@ class MainActivity : AppCompatActivity() {
     // 第 7 课 B：本地文件推送
     // ------------------------------------------------------------------
 
-    /** 选了本地文件：起手机端 HTTP 服务 -> 走"选设备播放"推给音箱/电视 */
+    /** 选了本地文件：先问"推送到设备播放"还是"本机播放/预览" */
     private fun pushLocalMedia(uri: Uri) {
         val name = queryLocalFileName(uri)
+        val lower = name.lowercase()
+        val isImg = IMAGE_EXTS.any { lower.endsWith(it) }
+        val isVid = VIDEO_EXTS.any { lower.endsWith(it) }
+
+        val actions = mutableListOf("📺 推送到设备播放")
+        val handlers = mutableListOf<() -> Unit>({ serveLocalAndPush(uri, name) })
+        actions += if (isImg) "🖼 本机预览图片" else "📱 本机播放（用手机播）"
+        handlers += {
+            val kind = when {
+                isImg -> LocalMediaActivity.KIND_IMAGE
+                isVid -> LocalMediaActivity.KIND_VIDEO
+                else -> LocalMediaActivity.KIND_AUDIO
+            }
+            openLocalMedia(uri.toString(), name, kind, artUrl = "", item = null)
+        }
+
+        AlertDialog.Builder(this)
+            .setTitle(name)
+            .setItems(actions.toTypedArray()) { _, which -> handlers.getOrNull(which)?.invoke() }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    /** 起本机 HTTP 服务并推送给 DLNA 设备 */
+    private fun serveLocalAndPush(uri: Uri, name: String) {
         Toast.makeText(this, "正在准备本地文件…", Toast.LENGTH_SHORT).show()
         vm.serveLocalFile(uri, name) { url, err ->
             if (url == null) {
@@ -1779,8 +1804,15 @@ class MainActivity : AppCompatActivity() {
         val actions = mutableListOf<String>()
         val handlers = mutableListOf<() -> Unit>()
 
-        actions += "▶ 立即播放"
-        handlers += { playMediaItemFromServer(item) }
+        if (isImageItem(item)) {
+            actions += "🖼 本地预览图片"
+            handlers += { openLocalMedia(item) }
+        } else {
+            actions += "▶ 推送到设备播放"
+            handlers += { playMediaItemFromServer(item) }
+            actions += "📱 本机播放（用手机播）"
+            handlers += { openLocalMedia(item) }
+        }
         actions += "⏭ 下一首播放（插队）"
         handlers += { vm.queuePlayNext(item) }
         actions += "＋ 加入队列"
@@ -1793,6 +1825,63 @@ class MainActivity : AppCompatActivity() {
             }
             .setNegativeButton("取消", null)
             .show()
+    }
+
+    /** 图片条目？（按 upnpClass / mime / 扩展名判断） */
+    private fun isImageItem(item: MediaItem): Boolean {
+        val cls = item.upnpClass.lowercase()
+        val mime = item.mime.lowercase()
+        if (cls.contains("imageitem") || mime.startsWith("image/")) return true
+        val path = item.resUrl.substringBefore('?').lowercase()
+        return path.endsWith(".jpg") || path.endsWith(".jpeg") || path.endsWith(".png") ||
+            path.endsWith(".gif") || path.endsWith(".webp") || path.endsWith(".bmp")
+    }
+
+    private fun isVideoItem(item: MediaItem): Boolean {
+        val cls = item.upnpClass.lowercase()
+        val mime = item.mime.lowercase()
+        if (cls.contains("videoitem") || mime.startsWith("video/")) return true
+        val path = item.resUrl.substringBefore('?').lowercase()
+        return path.endsWith(".mp4") || path.endsWith(".mkv") || path.endsWith(".mov") ||
+            path.endsWith(".avi") || path.endsWith(".webm") || path.endsWith(".3gp")
+    }
+
+    /** 打开本机播放/预览页（音乐/视频/图片共用） */
+    private fun openLocalMedia(item: MediaItem) {
+        val kind = when {
+            isImageItem(item) -> LocalMediaActivity.KIND_IMAGE
+            isVideoItem(item) -> LocalMediaActivity.KIND_VIDEO
+            else -> LocalMediaActivity.KIND_AUDIO
+        }
+        openLocalMedia(item.resUrl, item.title, kind, item.artUrl, item)
+    }
+
+    private fun openLocalMedia(url: String, title: String, kind: String, artUrl: String, item: MediaItem?) {
+        if (url.isBlank()) {
+            Toast.makeText(this, "没有可播放的地址", Toast.LENGTH_SHORT).show()
+            return
+        }
+        runCatching {
+            startActivity(
+                android.content.Intent(this, LocalMediaActivity::class.java).apply {
+                    putExtra(LocalMediaActivity.EXTRA_URL, url)
+                    putExtra(LocalMediaActivity.EXTRA_TITLE, title)
+                    putExtra(LocalMediaActivity.EXTRA_KIND, kind)
+                    putExtra(LocalMediaActivity.EXTRA_ART, artUrl)
+                    // 本地 content:// 文件需要把读权限带给新页面
+                    addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+            )
+        }.onFailure {
+            Toast.makeText(this, "无法打开：${it.message}", Toast.LENGTH_SHORT).show()
+        }
+        // 本机播放也算"最近播放"
+        item?.let { vm.noteHistoryPlayed(it) }
+    }
+
+    /** 列表行点击路由：图片直接本地预览，音视频仍是推送播放 */
+    private fun handleItemTap(item: MediaItem) {
+        if (isImageItem(item)) openLocalMedia(item) else playMediaItemFromServer(item)
     }
 
     /** 选择一台媒体服务器（0/1/多台三种情况） */
@@ -2418,5 +2507,9 @@ class MainActivity : AppCompatActivity() {
         /** 服务器分类列表的两种行类型 */
         private const val TYPE_GROUP = 0
         private const val TYPE_SONG = 1
+
+        /** 本地文件的常见扩展名（用于判断本机播放/预览方式） */
+        private val IMAGE_EXTS = listOf(".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp")
+        private val VIDEO_EXTS = listOf(".mp4", ".mkv", ".mov", ".avi", ".webm", ".3gp", ".m4v")
     }
 }

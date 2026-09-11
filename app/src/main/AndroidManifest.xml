@@ -39,6 +39,13 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- 本机播放（音乐/视频）与图片预览页 -->
+        <activity
+            android:name=".LocalMediaActivity"
+            android:configChanges="orientation|screenSize|keyboardHidden"
+            android:exported="false"
+            android:theme="@style/Theme.MyUPNP" />
     </application>
 
 </manifest>
