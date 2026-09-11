@@ -372,8 +372,10 @@ class MainActivity : AppCompatActivity() {
         btnBuildIndex.setOnClickListener {
             pickServerFor("给哪台服务器建立索引？") { e, cds -> confirmIndex(e, cds) }
         }
-        vm.indexProgressListener = { scanned, items, path ->
-            indexDialog?.setMessage("已扫目录 $scanned 个\n已收录曲目 $items 首\n当前：$path")
+        vm.indexProgressListener = { scanned, items, skipped, path ->
+            indexDialog?.setMessage(
+                "已扫目录 $scanned 个\n已收录曲目 $items 首\n跳过重复 $skipped 条\n当前：$path"
+            )
             if (pageSearch.visibility == View.VISIBLE) updateSearchStatus()
         }
         vm.indexDoneListener = { _, items, reason ->

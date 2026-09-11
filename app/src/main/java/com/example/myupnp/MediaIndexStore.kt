@@ -32,7 +32,11 @@ class MediaIndexStore(context: Context) :
         val upnpClass: String,
         val resUrl: String,
         val mime: String,
-        val artUrl: String
+        val artUrl: String,
+        /** 归一化 URL 去重键 */
+        val dedupeKey: String = "",
+        /** 标题+歌手+专辑 去重键 */
+        val trackKey: String = ""
     ) {
         fun toMediaItem(): MediaItem = MediaItem(
             id = objectId,
@@ -44,6 +48,10 @@ class MediaIndexStore(context: Context) :
             album = album,
             artUrl = artUrl
         )
+
+        /** 搜索时用来判断"是不是同一首歌" */
+        fun identityKey(): String =
+            trackKey.ifEmpty { dedupeKey.ifEmpty { resUrl } }
     }
 
     /** 索引概览 */
@@ -63,15 +71,24 @@ class MediaIndexStore(context: Context) :
               res_url    TEXT,
               mime       TEXT,
               art_url    TEXT,
+              size_bytes INTEGER DEFAULT 0,
+              dur_sec    INTEGER DEFAULT 0,
+              dedupe_key TEXT,
+              file_key   TEXT,
+              track_key  TEXT,
               updated_at INTEGER,
               PRIMARY KEY(server_udn, object_id)
             )
             """.trimIndent()
         )
         db.execSQL("CREATE INDEX idx_items_title ON items(title)")
-        // 同一首歌的"文件地址"是唯一的：多个浏览视图（所有音乐/专辑/歌手/文件夹）
-        // 会给出不同 objectID，但 res_url 相同 —— 用唯一索引保证一个文件只留一条
-        db.execSQL("CREATE UNIQUE INDEX idx_items_res ON items(server_udn, res_url)")
+        // 三重去重键（空键不参与唯一约束，避免把"没标签的条目"全判成同一个）：
+        //   dedupe_key 归一化 URL（去 query/fragment、小写）
+        //   file_key   文件大小+时长（同一文件必然一致，跟 URL/标签无关）← 最硬的判据
+        //   track_key  标题|歌手|专辑
+        db.execSQL("CREATE UNIQUE INDEX idx_items_res ON items(server_udn, dedupe_key) WHERE dedupe_key <> ''")
+        db.execSQL("CREATE UNIQUE INDEX idx_items_file ON items(server_udn, file_key) WHERE file_key <> ''")
+        db.execSQL("CREATE UNIQUE INDEX idx_items_track ON items(server_udn, track_key) WHERE track_key <> ''")
         db.execSQL(
             """
             CREATE TABLE containers(
@@ -88,16 +105,12 @@ class MediaIndexStore(context: Context) :
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        // v1 -> v2：按 res_url 去重（清掉已经重复的旧索引），並建立唯一索引
-        if (oldVersion < 2) {
-            db.execSQL(
-                """
-                DELETE FROM items WHERE rowid NOT IN (
-                  SELECT MIN(rowid) FROM items GROUP BY server_udn, res_url
-                )
-                """.trimIndent()
-            )
-            db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS idx_items_res ON items(server_udn, res_url)")
+        // v3：去重判据升级（新增文件大小/时长等键）。旧索引缺这些字段，
+        // 直接重建表结构 —— 索引是"可再生数据"，用户重新建一次索引即可。
+        if (oldVersion < 3) {
+            db.execSQL("DROP TABLE IF EXISTS items")
+            db.execSQL("DROP TABLE IF EXISTS containers")
+            onCreate(db)
         }
     }
 
@@ -105,7 +118,11 @@ class MediaIndexStore(context: Context) :
     // 写入（索引线程调用）
     // ------------------------------------------------------------------
 
-    fun putItem(serverUdn: String, parentId: String, item: MediaItem, now: Long) {
+    /**
+     * 写入一条曲目。命中任一去重键（URL 归一化 / 文件大小+时长 / 标题+歌手+专辑）
+     * 时会被忽略，返回 false —— 这就是"同一首歌多视图多 URL"不再重复入库的关键。
+     */
+    fun putItem(serverUdn: String, parentId: String, item: MediaItem, now: Long): Boolean {
         val values = ContentValues().apply {
             put("server_udn", serverUdn)
             put("object_id", item.id)
@@ -117,11 +134,43 @@ class MediaIndexStore(context: Context) :
             put("res_url", item.resUrl)
             put("mime", item.mime)
             put("art_url", item.artUrl)
+            put("size_bytes", item.sizeBytes)
+            put("dur_sec", item.durationSec)
+            put("dedupe_key", normalizeUrl(item.resUrl))
+            put("file_key", fileKeyOf(item))
+            put("track_key", trackKeyOf(item))
             put("updated_at", now)
         }
-        writableDatabase.insertWithOnConflict(
-            "items", null, values, SQLiteDatabase.CONFLICT_REPLACE
+        val rowId = writableDatabase.insertWithOnConflict(
+            "items", null, values, SQLiteDatabase.CONFLICT_IGNORE
         )
+        return rowId != -1L
+    }
+
+    /** URL 归一化：去掉 fragment / query / path 参数并小写，用于识别"同一文件的不同写法" */
+    private fun normalizeUrl(raw: String): String {
+        val t = raw.trim()
+        if (t.isEmpty()) return ""
+        return t.substringBefore('#')
+            .substringBefore('?')
+            .substringBefore(';')
+            .lowercase()
+    }
+
+    /** 文件键：大小+时长（都拿得到才有意义）；同一文件被不同 URL/标签暴露时仍一致 */
+    private fun fileKeyOf(item: MediaItem): String {
+        if (item.sizeBytes <= 0) return ""
+        return "${item.sizeBytes}|${item.durationSec}"
+    }
+
+    /** 曲目键：标题|歌手|专辑（归一化：小写、压缩空白） */
+    private fun trackKeyOf(item: MediaItem): String {
+        fun n(s: String) = s.trim().lowercase().replace(Regex("\\s+"), " ")
+        val t = n(item.title)
+        val a = n(item.artist)
+        val al = n(item.album)
+        if (t.isEmpty() && a.isEmpty() && al.isEmpty()) return ""
+        return "$t|$a|$al"
     }
 
     fun putContainer(serverUdn: String, objectId: String, parentId: String?, title: String, now: Long) {
@@ -178,11 +227,12 @@ class MediaIndexStore(context: Context) :
         val kw = keyword.trim()
         if (kw.isEmpty()) return emptyList()
         val like = "%$kw%"
-        // 用 LinkedHashMap 按 resUrl 去重（同一文件被多台服务器/多个视图暴露时只留一条）
+        // 用 identityKey（曲目键优先）去重：同一首歌被多台服务器/多个视图暴露时只留一条
         val unique = LinkedHashMap<String, IndexEntry>()
         readableDatabase.rawQuery(
             """
-            SELECT server_udn, object_id, title, artist, album, upnp_class, res_url, mime, art_url
+            SELECT server_udn, object_id, title, artist, album, upnp_class, res_url, mime, art_url,
+                   dedupe_key, track_key
             FROM items
             WHERE res_url <> '' AND (title LIKE ? OR artist LIKE ? OR album LIKE ?)
             ORDER BY title
@@ -200,9 +250,11 @@ class MediaIndexStore(context: Context) :
                     upnpClass = c.getString(5) ?: "",
                     resUrl = c.getString(6) ?: "",
                     mime = c.getString(7) ?: "",
-                    artUrl = c.getString(8) ?: ""
+                    artUrl = c.getString(8) ?: "",
+                    dedupeKey = c.getString(9) ?: "",
+                    trackKey = c.getString(10) ?: ""
                 )
-                unique.putIfAbsent(entry.resUrl, entry)
+                unique.putIfAbsent(entry.identityKey(), entry)
             }
         }
         return unique.values.toList().take(limit)
@@ -304,7 +356,8 @@ class MediaIndexStore(context: Context) :
         val out = ArrayList<IndexEntry>()
         readableDatabase.rawQuery(
             """
-            SELECT server_udn, object_id, title, artist, album, upnp_class, res_url, mime, art_url
+            SELECT server_udn, object_id, title, artist, album, upnp_class, res_url, mime, art_url,
+                   dedupe_key, track_key
             FROM items $whereClause
             """.trimIndent(),
             args
@@ -320,7 +373,9 @@ class MediaIndexStore(context: Context) :
                         upnpClass = c.getString(5) ?: "",
                         resUrl = c.getString(6) ?: "",
                         mime = c.getString(7) ?: "",
-                        artUrl = c.getString(8) ?: ""
+                        artUrl = c.getString(8) ?: "",
+                        dedupeKey = c.getString(9) ?: "",
+                        trackKey = c.getString(10) ?: ""
                     )
                 )
             }
@@ -335,6 +390,6 @@ class MediaIndexStore(context: Context) :
 
     private companion object {
         const val DB_NAME = "media_index.db"
-        const val DB_VERSION = 2
+        const val DB_VERSION = 3
     }
 }

@@ -24,8 +24,8 @@ class LibraryIndexer(
 ) {
 
     interface Listener {
-        /** 进度：已扫目录数 / 已收录曲目数 / 当前目录名 */
-        fun onProgress(scannedContainers: Int, indexedItems: Int, currentPath: String)
+        /** 进度：已扫目录数 / 已收录曲目数 / 跳过的重复数 / 当前目录名 */
+        fun onProgress(scannedContainers: Int, indexedItems: Int, skippedDuplicates: Int, currentPath: String)
 
         /** 结束：reason = done | stopped | error */
         fun onFinished(serverUdn: String, indexedItems: Int, reason: String)
@@ -64,12 +64,13 @@ class LibraryIndexer(
 
         var scanned = 0
         var items = store.stats().itemCount
+        var skipped = 0
 
         try {
             while (running.get()) {
                 val next = store.nextUnscannedContainer(serverUdn)
                 if (next == null) {
-                    Log.i(TAG, "[INDEX] 扫描完成：目录 $scanned 个")
+                    Log.i(TAG, "[INDEX] 扫描完成：目录 $scanned 个，跳过重复 $skipped 首")
                     listener.onFinished(serverUdn, items, "done")
                     return
                 }
@@ -88,15 +89,18 @@ class LibraryIndexer(
                         )
                         is MediaItem -> {
                             if (obj.resUrl.isNotBlank()) {
-                                store.putItem(serverUdn, objectId, obj, System.currentTimeMillis())
-                                items++
+                                // 命中任一去重键（同文件多 URL / 同标签）时返回 false
+                                val inserted = store.putItem(
+                                    serverUdn, objectId, obj, System.currentTimeMillis()
+                                )
+                                if (inserted) items++ else skipped++
                             }
                         }
                     }
                 }
                 store.markContainerScanned(serverUdn, objectId, System.currentTimeMillis())
                 scanned++
-                listener.onProgress(scanned, items, title.ifEmpty { objectId })
+                listener.onProgress(scanned, items, skipped, title.ifEmpty { objectId })
             }
             listener.onFinished(serverUdn, items, "stopped")
         } catch (e: Exception) {

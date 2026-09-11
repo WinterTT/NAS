@@ -108,8 +108,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val indexer = LibraryIndexer(
         store = indexStore,
         listener = object : LibraryIndexer.Listener {
-            override fun onProgress(scannedContainers: Int, indexedItems: Int, currentPath: String) {
-                mainHandler.post { indexProgressListener?.invoke(scannedContainers, indexedItems, currentPath) }
+            override fun onProgress(
+                scannedContainers: Int,
+                indexedItems: Int,
+                skippedDuplicates: Int,
+                currentPath: String
+            ) {
+                mainHandler.post {
+                    indexProgressListener?.invoke(scannedContainers, indexedItems, skippedDuplicates, currentPath)
+                }
             }
 
             override fun onFinished(serverUdn: String, indexedItems: Int, reason: String) {
@@ -120,7 +127,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     /** 索引进度 / 结束回调（Activity 注册，可为空） */
     @Volatile
-    var indexProgressListener: ((scanned: Int, items: Int, path: String) -> Unit)? = null
+    var indexProgressListener: ((scanned: Int, items: Int, skipped: Int, path: String) -> Unit)? = null
 
     @Volatile
     var indexDoneListener: ((serverUdn: String, items: Int, reason: String) -> Unit)? = null

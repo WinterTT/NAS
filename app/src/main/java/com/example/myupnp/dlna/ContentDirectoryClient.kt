@@ -203,19 +203,59 @@ object ContentDirectoryClient {
                     id = id,
                     title = extractTitle(inner),
                     upnpClass = extractElementText(inner, "class"),
-                    resUrl = res.first,
-                    mime = res.second,
+                    resUrl = res.url,
+                    mime = res.mime,
                     // 第 7 课 C：歌手/专辑/封面（有的设备用 dc:creator 当歌手）
                     artist = extractArtist(inner),
                     album = extractElementText(inner, "album"),
                     artUrl = absoluteUrl(
                         raw = extractElementText(inner, "albumArtURI"),
                         base = baseUrl
-                    )
+                    ),
+                    // 第 8 课：文件大小/时长 —— 用于"同一文件多 URL"时的去重
+                    sizeBytes = res.sizeBytes,
+                    durationSec = res.durationSec
                 )
             )
         }
         return result
+    }
+
+    /** res 节点的解析结果 */
+    private data class ResInfo(
+        val url: String = "",
+        val mime: String = "",
+        val sizeBytes: Long = 0,
+        val durationSec: Long = 0
+    )
+
+    /** 解析 <res> 节点：URL / mime / size / duration（属性缺失即 0） */
+    private fun extractRes(inner: String): ResInfo {
+        val m = Regex("<(?:[\\w.]+:)?res\\b([^>]*)>(.*?)</(?:[\\w.]+:)?res>", RegexOption.DOT_MATCHES_ALL)
+            .find(inner) ?: return ResInfo()
+        val attrs = m.groupValues[1]
+        val url = m.groupValues[2].trim()
+        val proto = Regex("protocolInfo\\s*=\\s*\"([^\"]*)\"").find(attrs)?.groupValues?.get(1)
+        val mime = proto?.split(':')?.getOrNull(2)?.trim() ?: ""
+        val size = Regex("size\\s*=\\s*\"(\\d+)\"").find(attrs)?.groupValues?.get(1)?.toLongOrNull() ?: 0L
+        val durationRaw = Regex("duration\\s*=\\s*\"([^\"]*)\"").find(attrs)?.groupValues?.get(1)
+        return ResInfo(url = url, mime = mime, sizeBytes = size, durationSec = parseDuration(durationRaw))
+    }
+
+    /** "0:04:12.345" / "H:MM:SS" -> 秒；解析不了就 0 */
+    private fun parseDuration(raw: String?): Long {
+        if (raw.isNullOrBlank()) return 0L
+        val clean = raw.substringBefore('.')
+        val parts = clean.split(':')
+        return try {
+            when (parts.size) {
+                3 -> parts[0].toLong() * 3600 + parts[1].toLong() * 60 + parts[2].toLong()
+                2 -> parts[0].toLong() * 60 + parts[1].toLong()
+                else -> 0L
+            }
+        } catch (_: NumberFormatException) {
+            0L
+        }
     }
 
     /** 歌手：upnp:artist 优先，没有就退回 dc:creator（个别设备命名习惯） */
@@ -255,17 +295,6 @@ object ContentDirectoryClient {
         val m = Regex("<(?:[\\w.]+:)?$localName\\b[^>]*>(.*?)</(?:[\\w.]+:)?$localName>", RegexOption.DOT_MATCHES_ALL)
             .find(inner)
         return m?.groupValues?.get(1)?.trim().orEmpty()
-    }
-
-    /** 解析 <res> 节点：(URL, mime)；protocolInfo 形如 http-get:*:audio/mpeg:DLNA... */
-    private fun extractRes(inner: String): Pair<String, String> {
-        val m = Regex("<(?:[\\w.]+:)?res\\b([^>]*)>(.*?)</(?:[\\w.]+:)?res>", RegexOption.DOT_MATCHES_ALL)
-            .find(inner) ?: return "" to ""
-        val attrs = m.groupValues[1]
-        val url = m.groupValues[2].trim()
-        val proto = Regex("protocolInfo\\s*=\\s*\"([^\"]*)\"").find(attrs)?.groupValues?.get(1)
-        val mime = proto?.split(':')?.getOrNull(2)?.trim() ?: ""
-        return url to mime
     }
 
     private fun extractInt(inner: String, localName: String): Int =

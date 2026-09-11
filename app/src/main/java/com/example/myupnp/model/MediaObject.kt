@@ -46,7 +46,11 @@ data class MediaItem(
     /** 第 7 课 C：专辑（upnp:album） */
     val album: String = "",
     /** 第 7 课 C：专辑封面地址（upnp:albumArtURI，相对路径已绝对化） */
-    val artUrl: String = ""
+    val artUrl: String = "",
+    /** 第 8 课：res 的字节大小（去重判据之一；0=未知） */
+    val sizeBytes: Long = 0,
+    /** 第 8 课：res 的时长秒数（去重判据之一；0=未知） */
+    val durationSec: Long = 0
 ) : MediaObject() {
     override fun displayText(): String {
         val icon = when {
