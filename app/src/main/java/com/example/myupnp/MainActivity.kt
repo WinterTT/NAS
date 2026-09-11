@@ -1484,18 +1484,19 @@ class MainActivity : AppCompatActivity() {
     private fun switchServerMode(mode: Int) {
         serverMode = mode
         serverFilter = null
+        serverStage = 1 // 切 Tab 回到"该分类的列表层"（不是详情层）
         updateServerTabs()
         refreshServerRows()
     }
 
-    /** 分类 Tab 与"全部播放/入队"只在选中具体分类后才出现（分类总览页保持干净） */
+    /** 分类 Tab 与"全部播放/入队"的显示规则（分类总览只显示分类列表） */
     private fun updateServerTabs() {
         val insideCategory = serverStage >= 1
         val chromeVisibility = if (insideCategory) View.VISIBLE else View.GONE
         btnTabAlbums.visibility = chromeVisibility
         btnTabArtists.visibility = chromeVisibility
         btnTabSongs.visibility = chromeVisibility
-        scopeRow.visibility = chromeVisibility
+        updateScopeRowVisibility()
 
         fun style(btn: Button, active: Boolean) {
             btn.setBackgroundResource(if (active) R.drawable.bg_pill_primary else R.drawable.bg_pill_ghost)
@@ -1509,6 +1510,15 @@ class MainActivity : AppCompatActivity() {
         style(btnTabAlbums, serverMode == 0)
         style(btnTabArtists, serverMode == 1)
         style(btnTabSongs, serverMode == 2)
+    }
+
+    /**
+     * "全部播放 / 全部入队"只在**选中了具体项**（某张专辑 / 某位歌手）时出现：
+     * 专辑、歌手的列表页只是"选项列表"，这里不该直接给出整批播放。
+     */
+    private fun updateScopeRowVisibility() {
+        val show = serverStage == 2 && serverFilter != null
+        scopeRow.visibility = if (show) View.VISIBLE else View.GONE
     }
 
     /** 按当前层级/模式刷新列表 */
@@ -1532,6 +1542,7 @@ class MainActivity : AppCompatActivity() {
             serverAdapter.notifyDataSetChanged()
             tvServerEmpty.visibility = if (serverRows.isEmpty()) View.VISIBLE else View.GONE
             tvServerEmpty.text = "索引里没有分类信息\n可以点右上「文件夹」直接浏览，或重新建立索引"
+            updateScopeRowVisibility()
             return
         }
 
@@ -1597,12 +1608,15 @@ class MainActivity : AppCompatActivity() {
             else -> "这个分类下没有内容"
         }
 
-        // "全部播放 / 全部入队"作用范围 = 当前所见范围（某专辑 / 某歌手 / 当前分类全部）
-        val scopeCount = serverPlayScopeSongs().size
-        btnPlayAll.text = "▶ 全部播放（$scopeCount）"
-        btnQueueAll.text = "＋ 全部入队（$scopeCount）"
-        btnPlayAll.isEnabled = scopeCount > 0
-        btnQueueAll.isEnabled = scopeCount > 0
+        // "全部播放 / 全部入队"：只在选中了具体专辑/歌手时出现并生效
+        updateScopeRowVisibility()
+        if (scopeRow.visibility == View.VISIBLE) {
+            val scopeCount = serverPlayScopeSongs().size
+            btnPlayAll.text = "▶ 全部播放（$scopeCount）"
+            btnQueueAll.text = "＋ 全部入队（$scopeCount）"
+            btnPlayAll.isEnabled = scopeCount > 0
+            btnQueueAll.isEnabled = scopeCount > 0
+        }
     }
 
     /**
