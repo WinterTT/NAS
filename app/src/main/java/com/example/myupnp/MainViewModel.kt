@@ -14,6 +14,8 @@ import androidx.lifecycle.viewModelScope
 import com.example.myupnp.core.EverythingFreeGate
 import com.example.myupnp.core.FeatureGate
 import com.example.myupnp.core.FeatureId
+import com.example.myupnp.device.ScpdLoader
+import com.example.myupnp.dlna.ContentDirectoryClient
 import com.example.myupnp.dlna.DlnaPlayer
 import com.example.myupnp.dlna.LastChangeParser
 import com.example.myupnp.gena.EventProperties
@@ -21,6 +23,7 @@ import com.example.myupnp.gena.GenaClient
 import com.example.myupnp.gena.LocalEventServer
 import com.example.myupnp.gena.LocalIp
 import com.example.myupnp.model.MediaItem
+import com.example.myupnp.model.MediaObject
 import com.example.myupnp.model.UpnpDevice
 import com.example.myupnp.model.UpnpService
 import com.example.myupnp.ssdp.SsdpDiscovery
@@ -92,6 +95,87 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun rememberLastRenderer(key: String) {
         if (key.isBlank()) return
         rendererPrefs.edit().putString("last", key).apply()
+    }
+
+    // ------------------------------------------------------------------
+    // 第 8 课：本地索引 + 搜索
+    // ------------------------------------------------------------------
+
+    /** 本地媒体索引（SQLite） */
+    val indexStore = MediaIndexStore(getApplication())
+
+    /** 曲库索引器（后台 BFS 扫描，可停止/续扫） */
+    val indexer = LibraryIndexer(
+        store = indexStore,
+        listener = object : LibraryIndexer.Listener {
+            override fun onProgress(scannedContainers: Int, indexedItems: Int, currentPath: String) {
+                mainHandler.post { indexProgressListener?.invoke(scannedContainers, indexedItems, currentPath) }
+            }
+
+            override fun onFinished(serverUdn: String, indexedItems: Int, reason: String) {
+                mainHandler.post { indexDoneListener?.invoke(serverUdn, indexedItems, reason) }
+            }
+        }
+    )
+
+    /** 索引进度 / 结束回调（Activity 注册，可为空） */
+    @Volatile
+    var indexProgressListener: ((scanned: Int, items: Int, path: String) -> Unit)? = null
+
+    @Volatile
+    var indexDoneListener: ((serverUdn: String, items: Int, reason: String) -> Unit)? = null
+
+    /** 开始（或继续）索引一台服务器 */
+    fun startIndexing(entry: Entry, cds: UpnpService) {
+        if (indexer.isRunning()) {
+            postMessage("索引正在建立中，请稍候（可停止）")
+            return
+        }
+        Log.i(TAG, "[INDEX] 开始索引: ${shownNameOf(entry)}")
+        postMessage("开始建立索引：${shownNameOf(entry)}")
+        indexer.start(deviceIdOf(entry), cds)
+    }
+
+    fun stopIndexing() = indexer.stop()
+
+    fun isIndexing(): Boolean = indexer.isRunning()
+
+    fun indexStats(): MediaIndexStore.Stats = indexStore.stats()
+
+    /** 本地索引搜索（同步，几毫秒级；调用方在主线程即可） */
+    fun searchIndex(keyword: String): List<MediaIndexStore.IndexEntry> = indexStore.search(keyword)
+
+    /** 清掉某台服务器的目录扫描状态（= 下次 startIndexing 会重新扫） */
+    fun resetServerIndex(entry: Entry) = indexStore.resetServer(deviceIdOf(entry))
+
+    fun clearIndex() = indexStore.clearAll()
+
+    /**
+     * 服务端搜索：先读 SCPD 判断有没有 Search 动作（不少设备不支持），
+     * 支持就先按 contains 语法搜，失败再用 like 语法重试一次。
+     */
+    fun searchOnServer(
+        entry: Entry,
+        cds: UpnpService,
+        keyword: String,
+        onDone: (results: List<MediaObject>, error: String?) -> Unit
+    ) {
+        controlExecutor.execute {
+            val actions = runCatching { ScpdLoader.load(cds.scpdUrl) }.getOrDefault(emptyList())
+            val supports = actions.any { it.name.equals("Search", ignoreCase = true) }
+            if (!supports) {
+                mainHandler.post {
+                    onDone(emptyList(), "这台服务器没有声明 Search 动作（可先用本地索引搜索）")
+                }
+                return@execute
+            }
+            var out = ContentDirectoryClient.search(cds, keyword, useLike = false)
+            if (!out.ok) out = ContentDirectoryClient.search(cds, keyword, useLike = true)
+            mainHandler.post {
+                if (out.ok) onDone(out.objects, null)
+                else onDone(emptyList(), "服务器搜索失败：${out.error}")
+            }
+        }
     }
 
     // ------------------------------------------------------------------

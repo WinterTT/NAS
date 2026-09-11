@@ -72,6 +72,18 @@ class MainActivity : AppCompatActivity() {
     private lateinit var pageLibrary: View
     private lateinit var pagePlay: View
     private lateinit var pageSettings: View
+    private lateinit var pageSearch: View
+    private lateinit var btnSearchEntry: TextView
+    private lateinit var btnSearchBack: Button
+    private lateinit var etSearch: android.widget.EditText
+    private lateinit var tvSearchStatus: TextView
+    private lateinit var tvSearchEmpty: TextView
+    private lateinit var listSearchResults: ListView
+    private lateinit var btnSearchServer: Button
+    private lateinit var btnBuildIndex: Button
+    private lateinit var searchAdapter: android.widget.BaseAdapter
+    private val searchItems = ArrayList<MediaItem>()
+    private var indexDialog: AlertDialog? = null
     private lateinit var bottomNav: com.google.android.material.bottomnavigation.BottomNavigationView
     private var lastTabBeforePlay = R.id.nav_library
     private var currentTabId = R.id.nav_library
@@ -221,6 +233,15 @@ class MainActivity : AppCompatActivity() {
         pageLibrary = findViewById(R.id.pageLibrary)
         pagePlay = findViewById(R.id.pagePlay)
         pageSettings = findViewById(R.id.pageSettings)
+        pageSearch = findViewById(R.id.pageSearch)
+        btnSearchEntry = findViewById(R.id.btnSearchEntry)
+        btnSearchBack = findViewById(R.id.btnSearchBack)
+        etSearch = findViewById(R.id.etSearch)
+        tvSearchStatus = findViewById(R.id.tvSearchStatus)
+        tvSearchEmpty = findViewById(R.id.tvSearchEmpty)
+        listSearchResults = findViewById(R.id.listSearchResults)
+        btnSearchServer = findViewById(R.id.btnSearchServer)
+        btnBuildIndex = findViewById(R.id.btnBuildIndex)
         bottomNav = findViewById(R.id.bottomNav)
         nowPlayingBar = findViewById(R.id.nowPlayingBar)
         tvPlayEmpty = findViewById(R.id.tvPlayEmpty)
@@ -265,6 +286,67 @@ class MainActivity : AppCompatActivity() {
         // 本地文件推送（第 7 课 B）
         btnPushLocal.setOnClickListener {
             localFileLauncher.launch(arrayOf("audio/*", "video/*", "image/*"))
+        }
+
+        // ===== 第 8 课：搜索与索引 =====
+        searchAdapter = object : android.widget.BaseAdapter() {
+            override fun getCount(): Int = searchItems.size
+            override fun getItem(p: Int): Any = searchItems[p]
+            override fun getItemId(p: Int): Long = p.toLong()
+            override fun getView(p: Int, convert: View?, parent: ViewGroup): View {
+                val view = convert
+                    ?: layoutInflater.inflate(R.layout.item_queue_row, parent, false)
+                val item = searchItems[p]
+                view.findViewById<TextView>(R.id.tvQIndex).text = (p + 1).toString()
+                view.findViewById<TextView>(R.id.tvQTitle).text = item.title
+                val sub = listOf(item.artist, item.album)
+                    .filter { it.isNotBlank() }
+                    .joinToString(" · ")
+                view.findViewById<TextView>(R.id.tvQSub).text = sub.ifEmpty { item.resUrl }
+                return view
+            }
+        }
+        listSearchResults.adapter = searchAdapter
+        listSearchResults.setOnItemClickListener { _, _, p, _ ->
+            searchItems.getOrNull(p)?.let { playMediaItemFromServer(it) }
+        }
+        listSearchResults.setOnItemLongClickListener { _, _, p, _ ->
+            val target = searchItems.getOrNull(p) ?: return@setOnItemLongClickListener false
+            showSearchItemMenu(target)
+            true
+        }
+        btnSearchEntry.setOnClickListener { showSearchPage(true) }
+        btnSearchBack.setOnClickListener { showSearchPage(false) }
+        etSearch.addTextChangedListener(object : android.text.TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) = Unit
+            override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) = Unit
+            override fun afterTextChanged(s: android.text.Editable?) = runLocalSearch(s?.toString().orEmpty())
+        })
+        btnSearchServer.setOnClickListener {
+            val kw = etSearch.text.toString().trim()
+            if (kw.isEmpty()) {
+                Toast.makeText(this, "先输入关键词", Toast.LENGTH_SHORT).show()
+            } else {
+                pickServerFor("在哪台服务器上搜索？") { e, cds -> serverSearch(e, cds, kw) }
+            }
+        }
+        btnBuildIndex.setOnClickListener {
+            pickServerFor("给哪台服务器建立索引？") { e, cds -> confirmIndex(e, cds) }
+        }
+        vm.indexProgressListener = { scanned, items, path ->
+            indexDialog?.setMessage("已扫目录 $scanned 个\n已收录曲目 $items 首\n当前：$path")
+            if (pageSearch.visibility == View.VISIBLE) updateSearchStatus()
+        }
+        vm.indexDoneListener = { _, items, reason ->
+            indexDialog?.dismiss()
+            indexDialog = null
+            val msg = when (reason) {
+                "done" -> "索引完成：共收录 $items 首"
+                "stopped" -> "已停止索引：已收录 $items 首"
+                else -> "索引中断：已收录 $items 首"
+            }
+            Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
+            updateSearchStatus()
         }
         // 迷你条（非按钮区域）点击 -> 打开播放页
         miniNowBar.setOnClickListener { switchTab(R.id.nav_playing) }
@@ -560,23 +642,31 @@ class MainActivity : AppCompatActivity() {
         showServicePicker(entry, device)
     }
 
-    /** 设备管理：收藏 / 重命名 / 恢复原名（长按设备行或从设备菜单进） */
+    /** 设备管理：收藏 / 重命名 / 恢复原名（服务器还能建立索引） */
     private fun showDeviceManageDialog(entry: Entry, device: UpnpDevice?) {
         val alias = vm.bookmarks.alias(vm.deviceIdOf(entry))
         val favorite = vm.isFavoriteEntry(entry)
-        val options = mutableListOf(
-            if (favorite) "取消收藏（从置顶移除 ⭐）" else "⭐ 收藏（列表置顶）",
-            if (alias == null) "重命名（设置别名）" else "重命名（当前别名：$alias）"
-        )
-        if (alias != null) options += "恢复原名"
+        val options = mutableListOf<String>()
+        val actions = mutableListOf<() -> Unit>()
+
+        options += if (favorite) "取消收藏（从置顶移除 ⭐）" else "⭐ 收藏（列表置顶）"
+        actions += { vm.toggleFavorite(entry.location) }
+        options += if (alias == null) "重命名（设置别名）" else "重命名（当前别名：$alias）"
+        actions += { showRenameDialog(entry, device, alias) }
+        if (alias != null) {
+            options += "恢复原名"
+            actions += { vm.clearDeviceAlias(entry.location) }
+        }
+        val cds = device?.services?.firstOrNull { it.serviceType.contains("ContentDirectory") }
+        if (cds != null) {
+            options += "建立 / 更新索引（扫描曲库）"
+            actions += { confirmIndex(entry, cds) }
+        }
+
         AlertDialog.Builder(this)
             .setTitle(vm.shownNameOf(entry))
             .setItems(options.toTypedArray()) { _, which ->
-                when (which) {
-                    0 -> vm.toggleFavorite(entry.location)
-                    1 -> showRenameDialog(entry, device, alias)
-                    2 -> if (alias != null) vm.clearDeviceAlias(entry.location)
-                }
+                actions.getOrNull(which)?.invoke()
             }
             .setNegativeButton("取消", null)
             .show()
@@ -1117,8 +1207,9 @@ class MainActivity : AppCompatActivity() {
         refreshMiniBar()
     }
 
-    /** 显示指定页（三页互斥） */
+    /** 显示指定页（三页互斥；搜索页随切换收起） */
     private fun showPage(target: View) {
+        pageSearch.visibility = View.GONE
         pagePlay.visibility = if (target === pagePlay) View.VISIBLE else View.GONE
         pageLibrary.visibility = if (target === pageLibrary) View.VISIBLE else View.GONE
         pageSettings.visibility = if (target === pageSettings) View.VISIBLE else View.GONE
@@ -1153,6 +1244,146 @@ class MainActivity : AppCompatActivity() {
         controlExecutor.execute {
             DlnaPlayer.setVolume(rc, target.coerceIn(0, 100))
         }
+    }
+
+    // ------------------------------------------------------------------
+    // 第 8 课：搜索与索引（页面前端逻辑）
+    // ------------------------------------------------------------------
+
+    /** 显示/隐藏搜索页（不是底部 Tab，从媒体库进入） */
+    private fun showSearchPage(show: Boolean) {
+        pageSearch.visibility = if (show) View.VISIBLE else View.GONE
+        if (show) {
+            pageLibrary.visibility = View.GONE
+            updateSearchStatus()
+            runLocalSearch(etSearch.text.toString())
+        } else {
+            showPage(
+                when (currentTabId) {
+                    R.id.nav_playing -> pagePlay
+                    R.id.nav_settings -> pageSettings
+                    else -> pageLibrary
+                }
+            )
+        }
+    }
+
+    private fun updateSearchStatus() {
+        val st = vm.indexStats()
+        val indexing = if (vm.isIndexing()) " · 正在建立索引…" else ""
+        tvSearchStatus.text =
+            "本地索引：${st.itemCount} 首 · 待扫目录 ${st.pendingContainers} 个$indexing\n" +
+                "提示：先在「媒体库」长按服务器建立索引，之后搜索就是秒出"
+    }
+
+    /** 本地索引搜索（输入即搜） */
+    private fun runLocalSearch(raw: String) {
+        val kw = raw.trim()
+        searchItems.clear()
+        if (kw.isEmpty()) {
+            searchAdapter.notifyDataSetChanged()
+            tvSearchEmpty.visibility = View.VISIBLE
+            tvSearchEmpty.text = "输入关键词开始搜索\n（歌名 / 歌手 / 专辑）"
+            updateSearchStatus()
+            return
+        }
+        val hits = vm.searchIndex(kw)
+        searchItems.addAll(hits.map { it.toMediaItem() })
+        searchAdapter.notifyDataSetChanged()
+        tvSearchEmpty.visibility = if (searchItems.isEmpty()) View.VISIBLE else View.GONE
+        tvSearchEmpty.text = "本地索引里没有匹配「$kw」\n可以点下方「在服务器上搜（实验）」"
+        tvSearchStatus.text =
+            "本地索引命中 ${searchItems.size} 条（索引共 ${vm.indexStats().itemCount} 首）"
+    }
+
+    /** 服务端搜索（先查 SCPD 是否支持 Search） */
+    private fun serverSearch(entry: Entry, cds: UpnpService, keyword: String) {
+        tvSearchStatus.text = "正在 ${vm.shownNameOf(entry)} 上搜索「$keyword」…"
+        vm.searchOnServer(entry, cds, keyword) { results, error ->
+            if (error != null) {
+                tvSearchStatus.text = error
+                Toast.makeText(this, error, Toast.LENGTH_LONG).show()
+                return@searchOnServer
+            }
+            val items = results.filterIsInstance<MediaItem>().filter { it.resUrl.isNotBlank() }
+            searchItems.clear()
+            searchItems.addAll(items)
+            searchAdapter.notifyDataSetChanged()
+            tvSearchEmpty.visibility = if (searchItems.isEmpty()) View.VISIBLE else View.GONE
+            tvSearchEmpty.text = "服务器上没有匹配「$keyword」的结果"
+            tvSearchStatus.text = "服务器搜索命中 ${searchItems.size} 条（${vm.shownNameOf(entry)}）"
+        }
+    }
+
+    /** 搜索结果项的长按菜单 */
+    private fun showSearchItemMenu(item: MediaItem) {
+        AlertDialog.Builder(this)
+            .setTitle(item.title)
+            .setItems(arrayOf("立即播放", "下一首播放（插队）", "加入队列")) { _, which ->
+                when (which) {
+                    0 -> playMediaItemFromServer(item)
+                    1 -> vm.queuePlayNext(item)
+                    2 -> vm.queueEnqueue(item)
+                }
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    /** 选择一台媒体服务器（0/1/多台三种情况） */
+    private fun pickServerFor(title: String, onPick: (Entry, UpnpService) -> Unit) {
+        refreshLibraryRows()
+        when {
+            libraryServers.isEmpty() -> Toast.makeText(
+                this, "还没发现媒体服务器：先回「媒体库」点开始扫描", Toast.LENGTH_LONG
+            ).show()
+
+            libraryServers.size == 1 -> {
+                val (e, cds) = libraryServers[0]
+                onPick(e, cds)
+            }
+
+            else -> AlertDialog.Builder(this)
+                .setTitle(title)
+                .setItems(libraryServers.map { vm.shownNameOf(it.first) }.toTypedArray()) { _, w ->
+                    libraryServers.getOrNull(w)?.let { onPick(it.first, it.second) }
+                }
+                .setNegativeButton("取消", null)
+                .show()
+        }
+    }
+
+    /** 建立索引前确认：继续扫 / 从头更新 */
+    private fun confirmIndex(entry: Entry, cds: UpnpService) {
+        val st = vm.indexStats()
+        AlertDialog.Builder(this)
+            .setTitle("建立索引：${vm.shownNameOf(entry)}")
+            .setMessage(
+                "把服务器曲库扫一遍，之后搜索就是秒出。\n" +
+                    "当前索引：${st.itemCount} 首，待扫目录 ${st.pendingContainers} 个。\n\n" +
+                    "· 继续扫描：接着没扫完的目录继续\n" +
+                    "· 更新索引：清掉扫描状态，从头重新扫一遍"
+            )
+            .setPositiveButton("继续扫描") { _, _ -> startIndex(entry, cds, reset = false) }
+            .setNeutralButton("更新索引") { _, _ -> startIndex(entry, cds, reset = true) }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    private fun startIndex(entry: Entry, cds: UpnpService, reset: Boolean) {
+        if (vm.isIndexing()) {
+            Toast.makeText(this, "索引正在建立中，可先停止", Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (reset) vm.resetServerIndex(entry)
+        indexDialog?.dismiss()
+        indexDialog = AlertDialog.Builder(this)
+            .setTitle("建立索引：${vm.shownNameOf(entry)}")
+            .setMessage("准备中…")
+            .setNegativeButton("停止") { _, _ -> vm.stopIndexing() }
+            .setCancelable(false)
+            .show()
+        vm.startIndexing(entry, cds)
     }
 
     // ------------------------------------------------------------------

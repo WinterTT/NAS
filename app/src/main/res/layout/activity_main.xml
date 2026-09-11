@@ -94,6 +94,24 @@
                 android:textColor="@color/text_faint"
                 android:textSize="12sp" />
 
+            <!-- 搜索入口（第 8 课：本地索引 + 服务器搜索） -->
+            <TextView
+                android:id="@+id/btnSearchEntry"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginHorizontal="12dp"
+                android:layout_marginTop="10dp"
+                android:background="@drawable/bg_row_card"
+                android:drawableStart="@drawable/ic_search"
+                android:drawablePadding="6dp"
+                android:drawableTint="@color/text_secondary"
+                android:gravity="center_vertical"
+                android:paddingHorizontal="12dp"
+                android:paddingVertical="10dp"
+                android:text="搜索曲库（歌名 / 歌手 / 专辑）"
+                android:textColor="@color/text_primary"
+                android:textSize="13sp" />
+
             <!-- 快捷入口：本地文件 / 队列 / 最近播放 -->
             <LinearLayout
                 android:layout_width="match_parent"
@@ -509,6 +527,130 @@
                 android:text="提示：在「媒体库」长按一台服务器，可以收藏置顶 / 重命名。"
                 android:textColor="@color/text_faint"
                 android:textSize="12sp" />
+        </LinearLayout>
+
+        <!-- ========== 页 4：搜索（本地索引 + 服务器搜索，从媒体库进入） ========== -->
+        <LinearLayout
+            android:id="@+id/pageSearch"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:orientation="vertical"
+            android:paddingHorizontal="14dp"
+            android:visibility="gone"
+            tools:visibility="gone">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="14dp"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <androidx.appcompat.widget.AppCompatButton
+                    android:id="@+id/btnSearchBack"
+                    android:layout_width="wrap_content"
+                    android:layout_height="38dp"
+                    android:background="@drawable/bg_pill_ghost"
+                    android:minWidth="0dp"
+                    android:paddingStart="14dp"
+                    android:paddingEnd="14dp"
+                    android:stateListAnimator="@null"
+                    android:text="返回"
+                    android:textAllCaps="false"
+                    android:textColor="@color/text_primary"
+                    android:textSize="13sp" />
+
+                <EditText
+                    android:id="@+id/etSearch"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="8dp"
+                    android:layout_weight="1"
+                    android:hint="搜索：歌名 / 歌手 / 专辑"
+                    android:imeOptions="actionSearch"
+                    android:inputType="text"
+                    android:maxLines="1"
+                    android:textColor="@color/text_primary"
+                    android:textColorHint="@color/text_faint"
+                    android:textSize="15sp" />
+            </LinearLayout>
+
+            <TextView
+                android:id="@+id/tvSearchStatus"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:lineSpacingExtra="3dp"
+                android:textColor="@color/text_secondary"
+                android:textSize="12sp" />
+
+            <FrameLayout
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_marginTop="6dp"
+                android:layout_weight="1">
+
+                <ListView
+                    android:id="@+id/listSearchResults"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:clipToPadding="false"
+                    android:divider="@null"
+                    android:dividerHeight="0dp"
+                    android:paddingBottom="8dp" />
+
+                <TextView
+                    android:id="@+id/tvSearchEmpty"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="center"
+                    android:gravity="center"
+                    android:lineSpacingExtra="4dp"
+                    android:textColor="@color/text_faint"
+                    android:textSize="14sp"
+                    android:visibility="gone"
+                    tools:visibility="visible"
+                    tools:text="输入关键词开始搜索" />
+            </FrameLayout>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:orientation="horizontal">
+
+                <androidx.appcompat.widget.AppCompatButton
+                    android:id="@+id/btnSearchServer"
+                    android:layout_width="0dp"
+                    android:layout_height="38dp"
+                    android:layout_marginEnd="4dp"
+                    android:layout_weight="1"
+                    android:background="@drawable/bg_pill_ghost"
+                    android:minWidth="0dp"
+                    android:paddingStart="4dp"
+                    android:paddingEnd="4dp"
+                    android:stateListAnimator="@null"
+                    android:text="在服务器上搜（实验）"
+                    android:textAllCaps="false"
+                    android:textColor="@color/text_primary"
+                    android:textSize="12sp" />
+
+                <androidx.appcompat.widget.AppCompatButton
+                    android:id="@+id/btnBuildIndex"
+                    android:layout_width="0dp"
+                    android:layout_height="38dp"
+                    android:layout_marginStart="4dp"
+                    android:layout_weight="1"
+                    android:background="@drawable/bg_pill_ghost"
+                    android:minWidth="0dp"
+                    android:paddingStart="4dp"
+                    android:paddingEnd="4dp"
+                    android:stateListAnimator="@null"
+                    android:text="建立/更新索引"
+                    android:textAllCaps="false"
+                    android:textColor="@color/text_primary"
+                    android:textSize="12sp" />
+            </LinearLayout>
         </LinearLayout>
     </FrameLayout>
 

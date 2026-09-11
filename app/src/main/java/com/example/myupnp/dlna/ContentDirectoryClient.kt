@@ -63,6 +63,53 @@ object ContentDirectoryClient {
                 "SortCriteria" to ""
             )
         )
+        return toBrowseResult(result, service.controlUrl)
+    }
+
+    // ------------------------------------------------------------------
+    // 服务端搜索（Search 动作，可选能力，取决于设备实现）
+    // ------------------------------------------------------------------
+
+    /**
+     * 在服务器上搜索（ContentDirectory:Search）。
+     * Search 属于可选动作：不少设备不支持或只认部分语法。调用方应先查
+     * SCPD 是否声明了 Search；失败时可用 [useLike] 再试一次。
+     *
+     * @param useLike false 用 `contains`（较通用）；true 用 `like "%kw%"`（部分服务器才认）
+     */
+    fun search(
+        service: com.example.myupnp.model.UpnpService,
+        keyword: String,
+        containerId: String = ROOT_OBJECT_ID,
+        start: Int = 0,
+        count: Int = 0,
+        useLike: Boolean = false
+    ): BrowseResult {
+        val kw = keyword.replace("\"", "").trim()
+        if (kw.isEmpty()) return BrowseResult(objects = emptyList())
+        val criteria = if (useLike) {
+            """(dc:title like "%$kw%") or (upnp:artist like "%$kw%") or (upnp:album like "%$kw%")"""
+        } else {
+            """(dc:title contains "$kw") or (upnp:artist contains "$kw") or (upnp:album contains "$kw")"""
+        }
+        val result = SoapCaller.call(
+            controlUrl = service.controlUrl,
+            serviceType = service.serviceType,
+            actionName = "Search",
+            args = mapOf(
+                "ContainerID" to containerId,
+                "SearchCriteria" to criteria,
+                "Filter" to "*",
+                "StartingIndex" to start.toString(),
+                "RequestedCount" to count.toString(),
+                "SortCriteria" to ""
+            )
+        )
+        return toBrowseResult(result, service.controlUrl)
+    }
+
+    /** SOAP 结果 -> BrowseResult（Browse 与 Search 共用同一套 DIDL 解析） */
+    private fun toBrowseResult(result: SoapCaller.SoapResult, baseUrl: String): BrowseResult {
         if (!result.success) {
             return BrowseResult(
                 ok = false,
@@ -81,7 +128,7 @@ object ContentDirectoryClient {
                 rawSnippet = result.body.take(600)
             )
         }
-        return BrowseResult(objects = parseResult(didl, service.controlUrl))
+        return BrowseResult(objects = parseResult(didl, baseUrl), soapHttp = result.httpCode)
     }
 
     // ------------------------------------------------------------------
