@@ -1324,29 +1324,33 @@ class MainActivity : AppCompatActivity() {
         }
         listView.setOnItemLongClickListener { _, _, p, _ ->
             val target = rows.getOrNull(p) ?: return@setOnItemLongClickListener false
+            val actions = listOf("立即播放", "移到下一首（置顶）", "上移", "下移", "删除")
+            val handlers = listOf<() -> Unit>(
+                {
+                    queueDialog?.dismiss()
+                    playQueueRow(target, p)
+                },
+                {
+                    vm.queueMovePendingToNext(p)
+                    refresh()
+                },
+                {
+                    vm.queueMovePendingAt(p, -1)
+                    refresh()
+                },
+                {
+                    vm.queueMovePendingAt(p, 1)
+                    refresh()
+                },
+                {
+                    vm.queueRemovePendingAt(p)
+                    refresh()
+                }
+            )
             AlertDialog.Builder(this)
                 .setTitle(target.title)
-                .setItems(
-                    arrayOf("立即播放", "上移", "下移", "删除")
-                ) { _, which ->
-                    when (which) {
-                        0 -> {
-                            queueDialog?.dismiss()
-                            playQueueRow(target, p)
-                        }
-                        1 -> {
-                            vm.queueMovePendingAt(p, -1)
-                            refresh()
-                        }
-                        2 -> {
-                            vm.queueMovePendingAt(p, 1)
-                            refresh()
-                        }
-                        3 -> {
-                            vm.queueRemovePendingAt(p)
-                            refresh()
-                        }
-                    }
+                .setItems(actions.toTypedArray()) { _, which ->
+                    handlers.getOrNull(which)?.invoke()
                 }
                 .setNegativeButton("取消", null)
                 .show()
@@ -1670,14 +1674,23 @@ class MainActivity : AppCompatActivity() {
             return
         }
         val label = if (serverMode == 0) "《$groupTitle》" else groupTitle
+        val items = songs.map { it.toMediaItem() }
+        val actions = listOf(
+            "▶ 全部播放（从这里开始）",
+            "⏭ 下一首播放（整批插队）",
+            "＋ 全部加入队列",
+            "只播放第一首"
+        )
+        val handlers = listOf<() -> Unit>(
+            { playAllSongs(songs, label) },
+            { vm.queuePlayNextAll(items, label) },
+            { vm.queueEnqueueAll(items, label) },
+            { playMediaItemFromServer(songs.first().toMediaItem()) }
+        )
         AlertDialog.Builder(this)
             .setTitle("$label（${songs.size} 首）")
-            .setItems(arrayOf("▶ 全部播放（从这里开始）", "＋ 全部加入队列", "只播放第一首")) { _, which ->
-                when (which) {
-                    0 -> playAllSongs(songs, label)
-                    1 -> vm.queueEnqueueAll(songs.map { it.toMediaItem() }, label)
-                    2 -> playMediaItemFromServer(songs.first().toMediaItem())
-                }
+            .setItems(actions.toTypedArray()) { _, which ->
+                handlers.getOrNull(which)?.invoke()
             }
             .setNegativeButton("取消", null)
             .show()

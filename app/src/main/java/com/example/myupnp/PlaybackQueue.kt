@@ -96,6 +96,20 @@ class PlaybackQueue {
         pending.add(0, item)
     }
 
+    /** 整批插到队首（"整张专辑 → 下一首播放"）：保持传入顺序，重复的先移除 */
+    fun playNextAll(items: List<MediaItem>) {
+        if (items.isEmpty()) return
+        pending.removeAll { p -> items.any { same(p, it) } }
+        pending.addAll(0, items)
+    }
+
+    /** 把待播中的第 index 首移到队首（队列里的"移到下一首"） */
+    fun movePendingToFront(index: Int) {
+        if (index !in pending.indices) return
+        val item = pending.removeAt(index)
+        pending.add(0, item)
+    }
+
     /** 删除待播中的第 index 首（不影响当前在播的） */
     fun removePendingAt(index: Int) {
         if (index in pending.indices) pending.removeAt(index)

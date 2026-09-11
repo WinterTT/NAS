@@ -918,6 +918,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         postMessage("已插到队首：当前这首播完就播《${item.title}》")
     }
 
+    /** 整批插到队首（整张专辑 / 某歌手 → 下一首播放） */
+    fun queuePlayNextAll(items: List<MediaItem>, label: String) {
+        if (items.isEmpty()) return
+        playbackQueue.playNextAll(items)
+        syncQueueUi()
+        postMessage("已把 $label 的 ${items.size} 首插到下一首（当前这首播完接着播）")
+    }
+
+    /** 队列里把某一首移到队首（= 下一首播放） */
+    fun queueMovePendingToNext(index: Int) {
+        if (index !in 0 until playbackQueue.pendingCount) return
+        val name = playbackQueue.pendingAt(index)?.title ?: return
+        playbackQueue.movePendingToFront(index)
+        syncQueueUi()
+        postMessage("已把《$name》移到下一首")
+    }
+
     /** 删除待播中的某一首 */
     fun queueRemovePendingAt(index: Int) {
         if (index !in 0 until playbackQueue.pendingCount) return
