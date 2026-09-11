@@ -539,7 +539,7 @@ class MainActivity : AppCompatActivity() {
 
             override fun onStopTrackingTouch(bar: android.widget.SeekBar?) {
                 volDragging = false
-                bar?.progress?.let { sendVolume(it) }
+                bar?.progress?.let { applyVolume(it) }
             }
         })
 
@@ -560,7 +560,7 @@ class MainActivity : AppCompatActivity() {
                 val dur = vm.uiState.value.durationSec
                 if (dur > 0) {
                     val target = bar?.progress?.toLong()?.coerceIn(0, dur) ?: return
-                    nowSession.seekTo(target)
+                    seekCurrentTo(target)
                 }
             }
         })
@@ -1252,23 +1252,38 @@ class MainActivity : AppCompatActivity() {
     // 第 7 课 B：本地文件推送
     // ------------------------------------------------------------------
 
-    /** 选了本地文件：先问"推送到设备播放"还是"本机播放/预览" */
+    /** 选了本地文件：推送设备 / 本机播放（音乐走 App 播放页，视频交系统播放器）/ 预览图片 */
     private fun pushLocalMedia(uri: Uri) {
         val name = queryLocalFileName(uri)
         val lower = name.lowercase()
         val isImg = IMAGE_EXTS.any { lower.endsWith(it) }
         val isVid = VIDEO_EXTS.any { lower.endsWith(it) }
+        val title = name.substringBeforeLast('.').ifBlank { name }
 
         val actions = mutableListOf("📺 推送到设备播放")
         val handlers = mutableListOf<() -> Unit>({ serveLocalAndPush(uri, name) })
-        actions += if (isImg) "🖼 本机预览图片" else "📱 本机播放（用手机播）"
-        handlers += {
-            val kind = when {
-                isImg -> LocalMediaActivity.KIND_IMAGE
-                isVid -> LocalMediaActivity.KIND_VIDEO
-                else -> LocalMediaActivity.KIND_AUDIO
+
+        when {
+            isImg -> {
+                actions += "🖼 本机预览图片"
+                handlers += { openImagePreview(uri.toString(), title) }
             }
-            openLocalMedia(uri.toString(), name, kind, artUrl = "", item = null)
+            isVid -> {
+                actions += "🎬 用手机上的播放器打开（VLC 等）"
+                handlers += {
+                    openWithSystemPlayer(
+                        MediaItem(id = uri.toString(), title = title, resUrl = uri.toString())
+                    )
+                }
+            }
+            else -> {
+                actions += "📱 本机播放（用手机播）"
+                handlers += {
+                    playLocalAudio(
+                        MediaItem(id = uri.toString(), title = title, resUrl = uri.toString())
+                    )
+                }
+            }
         }
 
         AlertDialog.Builder(this)
@@ -1826,20 +1841,31 @@ class MainActivity : AppCompatActivity() {
 
     /**
      * 曲目操作菜单（行尾「⋮」与长按共用）。
-     * 以后要加功能（收藏、详情、下载…）就往这个列表里追加即可。
+     * 分工：音乐可"推送到设备"或"本机播放（App 播放页）"；视频推送到设备或交给系统播放器；
+     * 图片直接本地预览。
      */
     private fun showSongActionsMenu(item: MediaItem) {
         val actions = mutableListOf<String>()
         val handlers = mutableListOf<() -> Unit>()
+        val kind = MediaKinds.of(item.mime, item.upnpClass, item.resUrl)
 
-        if (isImageItem(item)) {
-            actions += "🖼 本地预览图片"
-            handlers += { openLocalMedia(item) }
-        } else {
-            actions += "▶ 推送到设备播放"
-            handlers += { playMediaItemFromServer(item) }
-            actions += "📱 本机播放（用手机播）"
-            handlers += { openLocalMedia(item) }
+        when (kind) {
+            MediaKind.IMAGE -> {
+                actions += "🖼 本地预览图片"
+                handlers += { openImagePreview(item.resUrl, item.title) }
+            }
+            MediaKind.VIDEO -> {
+                actions += "▶ 推送到设备播放"
+                handlers += { playMediaItemFromServer(item) }
+                actions += "🎬 用手机上的播放器打开（VLC 等）"
+                handlers += { openWithSystemPlayer(item) }
+            }
+            else -> {
+                actions += "▶ 推送到设备播放"
+                handlers += { playMediaItemFromServer(item) }
+                actions += "📱 本机播放（用手机播）"
+                handlers += { playLocalAudio(item) }
+            }
         }
         actions += "⏭ 下一首播放（插队）"
         handlers += { vm.queuePlayNext(item) }
@@ -1855,49 +1881,61 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
-    /** 图片条目？（按 upnpClass / mime / 扩展名判断，统一走 MediaKinds） */
-    private fun isImageItem(item: MediaItem): Boolean =
-        MediaKinds.of(item.mime, item.upnpClass, item.resUrl) == MediaKind.IMAGE
-
-    private fun isVideoItem(item: MediaItem): Boolean =
-        MediaKinds.of(item.mime, item.upnpClass, item.resUrl) == MediaKind.VIDEO
-
-    /** 打开本机播放/预览页（音乐/视频/图片共用） */
-    private fun openLocalMedia(item: MediaItem) {
-        val kind = when {
-            isImageItem(item) -> LocalMediaActivity.KIND_IMAGE
-            isVideoItem(item) -> LocalMediaActivity.KIND_VIDEO
-            else -> LocalMediaActivity.KIND_AUDIO
-        }
-        openLocalMedia(item.resUrl, item.title, kind, item.artUrl, item)
+    /** 本机播放音乐（复用 App 播放页） */
+    private fun playLocalAudio(item: MediaItem) {
+        vm.startLocalPlayback(item)
+        switchTab(R.id.nav_playing)
     }
 
-    private fun openLocalMedia(url: String, title: String, kind: String, artUrl: String, item: MediaItem?) {
+    /** 视频交给系统播放器（用户可选 VLC 等已安装 App） */
+    private fun openWithSystemPlayer(item: MediaItem) {
+        val uri = android.net.Uri.parse(item.resUrl)
+        val mime = item.mime.ifBlank { "video/*" }
+        val intent = android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
+            setDataAndType(uri, mime)
+            addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        runCatching {
+            startActivity(android.content.Intent.createChooser(intent, "选择播放器播放视频"))
+            vm.noteHistoryPlayed(item)
+        }.onFailure {
+            Toast.makeText(this, "没有找到能播放该视频的应用（可装 VLC 等播放器）", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    /** 图片本地预览 */
+    private fun openImagePreview(url: String, title: String) {
         if (url.isBlank()) {
-            Toast.makeText(this, "没有可播放的地址", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "没有可预览的地址", Toast.LENGTH_SHORT).show()
             return
         }
         runCatching {
             startActivity(
-                android.content.Intent(this, LocalMediaActivity::class.java).apply {
-                    putExtra(LocalMediaActivity.EXTRA_URL, url)
-                    putExtra(LocalMediaActivity.EXTRA_TITLE, title)
-                    putExtra(LocalMediaActivity.EXTRA_KIND, kind)
-                    putExtra(LocalMediaActivity.EXTRA_ART, artUrl)
-                    // 本地 content:// 文件需要把读权限带给新页面
+                android.content.Intent(this, ImagePreviewActivity::class.java).apply {
+                    putExtra(ImagePreviewActivity.EXTRA_URL, url)
+                    putExtra(ImagePreviewActivity.EXTRA_TITLE, title)
                     addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 }
             )
         }.onFailure {
-            Toast.makeText(this, "无法打开：${it.message}", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "无法打开预览：${it.message}", Toast.LENGTH_SHORT).show()
         }
-        // 本机播放也算"最近播放"
-        item?.let { vm.noteHistoryPlayed(it) }
     }
 
-    /** 列表行点击路由：图片直接本地预览，音视频仍是推送播放 */
+    /** 图片条目？（按 upnpClass / mime / 扩展名判断，统一走 MediaKinds） */
+    private fun isImageItem(item: MediaItem): Boolean =
+        MediaKinds.of(item.mime, item.upnpClass, item.resUrl) == MediaKind.IMAGE
+
+    /**
+     * 列表行点击路由：
+     *   图片 → 本地预览；视频 → 交给系统播放器（VLC 等）；音乐 → 推送到设备
+     */
     private fun handleItemTap(item: MediaItem) {
-        if (isImageItem(item)) openLocalMedia(item) else playMediaItemFromServer(item)
+        when (MediaKinds.of(item.mime, item.upnpClass, item.resUrl)) {
+            MediaKind.IMAGE -> openImagePreview(item.resUrl, item.title)
+            MediaKind.VIDEO -> openWithSystemPlayer(item)
+            else -> playMediaItemFromServer(item)
+        }
     }
 
     /** 设备类型图标（音箱/电视/其他），比清一色 📺 更易分辨 */
@@ -2203,10 +2241,27 @@ class MainActivity : AppCompatActivity() {
     }
 
     /** 播放/暂停切换 → 转发给会话 */
-    private fun togglePlayPause() = nowSession.toggle()
+    // ------------------------------------------------------------------
+    // 播放控制：本机播放与"推送到设备"共用同一套 UI，这里按模式分流
+    // ------------------------------------------------------------------
 
-    /** 停止播放（保留会话，控制条不消失）→ 转发给会话 */
-    private fun stopNowPlaying() = nowSession.stop()
+    private fun togglePlayPause() {
+        if (vm.isLocalPlaying()) vm.localToggle() else nowSession.toggle()
+    }
+
+    private fun stopNowPlaying() {
+        if (vm.isLocalPlaying()) vm.localStop() else nowSession.stop()
+    }
+
+    /** 进度条松手：本机播放用本地 seek，否则走 AVTransport Seek */
+    private fun seekCurrentTo(targetSec: Long) {
+        if (vm.isLocalPlaying()) vm.localSeek(targetSec) else nowSession.seekTo(targetSec)
+    }
+
+    /** 音量滑杆：本机播放调手机媒体音量，否则发 SetVolume 给设备 */
+    private fun applyVolume(target: Int) {
+        if (vm.isLocalPlaying()) vm.localSetVolume(target) else sendVolume(target)
+    }
 
     /**
      * 若正在播放的设备已从发现列表消失（下线/心跳超时/清空），

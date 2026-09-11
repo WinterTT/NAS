@@ -368,6 +368,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             while (isActive) {
                 nowSession.tick(1_000L)   // 仅在 playing 时真正推进并回调
+                tickLocalPlayback()       // 本机播放时刷新进度
                 delay(1_000L)
             }
         }
@@ -468,6 +469,35 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     /** 本地文件 HTTP 服务（第 7 课 B：把手机里的媒体推给音箱/电视） */
     val fileServer = LocalFileServer(getApplication())
+
+    /**
+     * 本机音乐播放器（第 13 课：本机播放只处理音频，复用 App 播放页）。
+     * 用 lateinit + init 赋值：监听器里要引用它自己（出错时停止），
+     * 直接写成初始化表达式会形成递归类型推断。
+     */
+    lateinit var localPlayer: LocalPlayer
+
+    init {
+        localPlayer = LocalPlayer(
+            mainHandler = mainHandler,
+            listener = object : LocalPlayer.Listener {
+                override fun onLocalStateChanged() {
+                    syncNowPlayingState()
+                }
+
+                override fun onLocalCompleted() {
+                    // 本机播完一首 → 走同一套连播逻辑（本机模式会继续在本机播下一首）
+                    autoAdvanceQueue()
+                }
+
+                override fun onLocalError(message: String) {
+                    postMessage(message, isError = true)
+                    localPlayer.stop()
+                    syncNowPlayingState()
+                }
+            }
+        )
+    }
 
     private var multicastLock: WifiManager.MulticastLock? = null
 
@@ -745,6 +775,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val queueHasItems: Boolean = false,
         /** 播放历史：记录条数（有内容时显示"最近播放"入口） */
         val historyCount: Int = 0,
+        /** 当前 this 会话是不是"本机播放"（手机自己播，不是推给设备） */
+        val nowPlayingIsLocal: Boolean = false,
     )
 
     private val _uiState = MutableStateFlow(UiState())
@@ -863,10 +895,38 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     // ------------------------------------------------------------------
 
     private fun syncNowPlayingState() {
+        val local = localPlayer.current
         val np = nowSession.current
+        if (local != null) {
+            // 本机播放：状态来自 LocalPlayer（进度/时长/音量都取自手机）
+            val dur = localPlayer.durationSec()
+            val pos = localPlayer.positionSec()
+            _uiState.update {
+                it.copy(
+                    nowPlayingActive = true,
+                    nowPlayingIsLocal = true,
+                    nowPlayingTitle = local.title,
+                    nowPlayingDevice = "本机播放（手机）",
+                    nowPlayingArtist = local.artist,
+                    nowPlayingAlbum = local.album,
+                    nowPlayingArtUrl = local.artUrl,
+                    nowPlayingPlaying = localPlayer.isPlaying(),
+                    nowPlayingHasRc = true,
+                    positionSec = pos,
+                    durationSec = dur,
+                    seekable = dur > 0,
+                    volume = localPlayer.volumePercent(),
+                    queuePendingCount = playbackQueue.pendingCount,
+                    queueCurrentTitle = playbackQueue.current?.title.orEmpty(),
+                    queueHasItems = playbackQueue.hasActivity,
+                )
+            }
+            return
+        }
         _uiState.update {
             it.copy(
                 nowPlayingActive = np != null,
+                nowPlayingIsLocal = false,
                 nowPlayingTitle = np?.title.orEmpty(),
                 nowPlayingDevice = np?.deviceName.orEmpty(),
                 nowPlayingArtist = np?.artist.orEmpty(),
@@ -883,7 +943,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 queueHasItems = playbackQueue.hasActivity,
             )
         }
-        // 有会话就记忆"上次在播什么"（重启后恢复用）
+        // 有会话就记忆"上次在播什么"（重启后恢复用）；本机播放不写记忆（重启后不可续）
         if (np != null) {
             saveLastSession(
                 deviceKey = np.deviceKey,
@@ -893,6 +953,39 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         } else {
             clearLastSession()
         }
+    }
+
+    // ------------------------------------------------------------------
+    // 第 13 课：本机音乐播放（复用同一套播放页/控制条）
+    // ------------------------------------------------------------------
+
+    /**
+     * 在本机播放一首（音频）。会结束 DLNA 会话，避免出现两个"正在播放"来源。
+     */
+    fun startLocalPlayback(item: MediaItem) {
+        if (nowSession.isActive) nowSession.end("切换到本机播放")
+        Log.i(TAG, "[LOCAL] 本机播放: ${item.title}")
+        localPlayer.play(getApplication(), item)
+        noteHistoryPlayed(item)
+        syncNowPlayingState()
+    }
+
+    fun isLocalPlaying(): Boolean = localPlayer.isActive
+
+    fun localToggle() = localPlayer.toggle()
+
+    fun localStop() {
+        localPlayer.stop()
+        syncNowPlayingState()
+    }
+
+    fun localSeek(sec: Long) = localPlayer.seekTo(sec)
+
+    fun localSetVolume(percent: Int) = localPlayer.setVolumePercent(percent)
+
+    /** tick 时刷新本机进度（播放页进度条/时间会跟着走） */
+    private fun tickLocalPlayback() {
+        if (localPlayer.isActive && localPlayer.isPlaying()) syncNowPlayingState()
     }
 
     /** 队列记账变化后刷新 UI 里的队列角标（只动队列字段），并顺带持久化 */
@@ -1128,11 +1221,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         syncQueueUi()
     }
 
-    /** 控制条"下一首"：跳过当前，直接播排队的第一首 */
+    /** 控制条"下一首"：跳过当前，直接播排队的第一首（本机模式则本机播） */
     fun queueNextItem() {
         val item = playbackQueue.nextUp
         if (item == null) {
             postMessage("没有下一首了（队列已播完）")
+            return
+        }
+        if (localPlayer.isActive) {
+            playbackQueue.commitNext(item)
+            syncQueueUi()
+            startLocalPlayback(item)
             return
         }
         pushQueueItem(item) {
@@ -1148,6 +1247,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             postMessage("没有上一首（前面还没播过歌）")
             return
         }
+        if (localPlayer.isActive) {
+            playbackQueue.commitPrevious(item)
+            syncQueueUi()
+            startLocalPlayback(item)
+            return
+        }
         pushQueueItem(item) {
             playbackQueue.commitPrevious(item)
             syncQueueUi()
@@ -1159,6 +1264,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val item = playbackQueue.pendingAt(index)
         if (item == null) {
             postMessage("队列里没有这一首")
+            return
+        }
+        if (localPlayer.isActive) {
+            playbackQueue.commitPlayNow(item)
+            syncQueueUi()
+            startLocalPlayback(item)
             return
         }
         pushQueueItem(item) {
@@ -1176,11 +1287,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     /** 供 UI 弹队列列表用（主线程读取，安全） */
     fun queuePendingSnapshot(): List<MediaItem> = playbackQueue.snapshotPending()
 
-    /** 一首自然播完 -> 自动连播队首 */
+    /** 一首自然播完 -> 自动连播队首（本机模式继续用手机播） */
     private fun autoAdvanceQueue() {
         val item = playbackQueue.nextUp
         if (item == null) {
             if (playbackQueue.hasActivity) postMessage("队列已播完")
+            return
+        }
+        if (localPlayer.isActive) {
+            playbackQueue.commitNext(item)
+            syncQueueUi()
+            startLocalPlayback(item)
             return
         }
         pushQueueItem(item) {
@@ -1434,6 +1551,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         subManager.unsubscribeAll()
         eventServer.stop()
         fileServer.stop()
+        localPlayer.release()
         mainHandler.removeCallbacksAndMessages(null)
         fetchExecutor.shutdownNow()
         controlExecutor.shutdownNow()

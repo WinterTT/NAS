@@ -40,9 +40,9 @@
             </intent-filter>
         </activity>
 
-        <!-- 本机播放（音乐/视频）与图片预览页 -->
+        <!-- 图片本地预览页（音乐走 App 播放页，视频交给系统播放器） -->
         <activity
-            android:name=".LocalMediaActivity"
+            android:name=".ImagePreviewActivity"
             android:configChanges="orientation|screenSize|keyboardHidden"
             android:exported="false"
             android:theme="@style/Theme.MyUPNP" />
