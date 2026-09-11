@@ -66,6 +66,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val controlExecutor: ExecutorService = Executors.newSingleThreadExecutor { r ->
         Thread(r, "soap-control").apply { isDaemon = true }
     }
+
+    /** 兜底轮询专用线程：不占用 controlExecutor，避免卡住用户的操作 */
+    private val pollExecutor: ExecutorService = Executors.newSingleThreadExecutor { r ->
+        Thread(r, "upnp-poll").apply { isDaemon = true }
+    }
     val featureGate: FeatureGate = EverythingFreeGate
 
     /** 设备级用户数据（第 7 课 E：收藏/别名，持久化） */
@@ -177,6 +182,45 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             while (isActive) {
                 nowSession.tick(1_000L)   // 仅在 playing 时真正推进并回调
                 delay(1_000L)
+            }
+        }
+        // 兜底轮询：只在"很久没收到 GENA 事件"时发查询，事件正常时几乎零开销
+        viewModelScope.launch {
+            var step = 0
+            while (isActive) {
+                delay(POLL_TICK_MS)
+                step++
+                pollSessionFallback(step)
+            }
+        }
+    }
+
+    /**
+     * 事件不可靠时的兜底：定时用 GetTransportInfo/GetPositionInfo/GetVolume 校准
+     * 播放状态、进度、音量，避免进度条/音量"漂着不准"。
+     * 判定依据：距上次收到事件超过 POLL_EVENT_FRESH_MS 才轮询。
+     */
+    private fun pollSessionFallback(step: Int) {
+        val np = nowSession.current ?: return
+        if (nowSession.millisSinceLastEvent() < POLL_EVENT_FRESH_MS) return // 事件正常，不打扰
+        pollExecutor.execute {
+            val state = runCatching { DlnaPlayer.getTransportState(np.avt) }.getOrNull()
+            if (state != null) mainHandler.post { nowSession.applyPolledTransportState(state) }
+
+            if (step % 3 == 0) { // 约每 15 秒校准一次进度
+                val info = runCatching { DlnaPlayer.getPositionInfo(np.avt) }.getOrNull()
+                if (info != null) {
+                    mainHandler.post {
+                        nowSession.syncProgress(info.positionSec, info.durationSec)
+                    }
+                }
+            }
+            if (step % 6 == 0) { // 约每 30 秒校准一次音量
+                val rc = np.rc
+                if (rc != null) {
+                    val v = runCatching { DlnaPlayer.getVolume(rc) }.getOrDefault(-1)
+                    if (v >= 0) mainHandler.post { nowSession.syncVolume(v) }
+                }
             }
         }
     }
@@ -773,7 +817,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val h = runCatching { URL(e.location).host }.getOrNull()
             h == playingHost
         }
-        if (!stillAlive) nowSession.end("设备已离线")
+        if (!stillAlive) {
+            nowSession.end("设备已离线")
+            // 让用户知道"不是 App 抽风"：播放设备掉线了
+            postMessage("播放设备已离线，已收起播放控制条")
+        }
     }
 
     // ------------------------------------------------------------------
@@ -1076,6 +1124,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         mainHandler.removeCallbacksAndMessages(null)
         fetchExecutor.shutdownNow()
         controlExecutor.shutdownNow()
+        pollExecutor.shutdownNow()
         Log.i(TAG, "[VM] MainViewModel onCleared")
         super.onCleared()
     }
@@ -1085,6 +1134,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         const val HEARTBEAT_INTERVAL_MS = 10_000L
         const val DEVICE_STALE_MS = 45_000L
         const val NET_RESTART_DELAY_MS = 1_500L
+
+        /** 兜底轮询节拍；距上次事件超过新鲜阈值才真正发查询 */
+        const val POLL_TICK_MS = 5_000L
+        const val POLL_EVENT_FRESH_MS = 15_000L
 
         // 记忆上次播放（SharedPreferences key）
         private const val KEY_DEVICE_KEY = "device_key"

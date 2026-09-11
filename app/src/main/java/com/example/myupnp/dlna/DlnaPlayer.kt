@@ -88,6 +88,62 @@ object DlnaPlayer {
             args = mapOf("InstanceID" to INSTANCE_ID)
         )
 
+    // ------------------------------------------------------------------
+    // 状态查询（用于"事件不可靠时的兜底轮询"）
+    // ------------------------------------------------------------------
+
+    /** GetTransportInfo -> CurrentTransportState（PLAYING/PAUSED_PLAYBACK/STOPPED/…）；失败返回 null */
+    fun getTransportState(avt: UpnpService): String? {
+        val r = SoapCaller.call(
+            controlUrl = avt.controlUrl,
+            serviceType = avt.serviceType,
+            actionName = "GetTransportInfo",
+            args = mapOf("InstanceID" to INSTANCE_ID)
+        )
+        if (!r.success) return null
+        return Regex("<CurrentTransportState>\\s*(\\w+)\\s*</CurrentTransportState>")
+            .find(r.body)?.groupValues?.get(1)
+    }
+
+    /** GetPositionInfo 的结果（秒；NOT_IMPLEMENTED/解析失败为 null） */
+    data class PositionInfo(
+        val positionSec: Long?,
+        val durationSec: Long?,
+        val trackUri: String? = null
+    )
+
+    /** GetPositionInfo -> 进度/时长/当前曲目 URL；失败返回 null */
+    fun getPositionInfo(avt: UpnpService): PositionInfo? {
+        val r = SoapCaller.call(
+            controlUrl = avt.controlUrl,
+            serviceType = avt.serviceType,
+            actionName = "GetPositionInfo",
+            args = mapOf("InstanceID" to INSTANCE_ID)
+        )
+        if (!r.success) return null
+        return PositionInfo(
+            positionSec = parseUpnpTime(extractTag(r.body, "RelTime")),
+            durationSec = parseUpnpTime(extractTag(r.body, "TrackDuration")),
+            trackUri = extractTag(r.body, "TrackURI")
+        )
+    }
+
+    private fun extractTag(body: String, tag: String): String? =
+        Regex("<$tag>\\s*(.*?)\\s*</$tag>").find(body)?.groupValues?.get(1)
+
+    /** UPnP 时间 "H:MM:SS"（或 NOT_IMPLEMENTED）-> 秒 */
+    private fun parseUpnpTime(raw: String?): Long? {
+        if (raw.isNullOrBlank()) return null
+        if (raw.contains("NOT_IMPLEMENTED", ignoreCase = true)) return null
+        val parts = raw.split(":")
+        if (parts.size != 3) return null
+        return try {
+            parts[0].toLong() * 3600 + parts[1].toLong() * 60 + parts[2].toLong()
+        } catch (_: NumberFormatException) {
+            null
+        }
+    }
+
     /** 音量+/-（RenderingControl） */
     fun stepVolume(rc: UpnpService, delta: Int): SoapCaller.SoapResult {
         // 先读当前音量（GetVolume 的 out 参数是 CurrentVolume）

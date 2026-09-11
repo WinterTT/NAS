@@ -77,6 +77,10 @@ class NowPlayingSession(
     /** 本地兜底：连续超过片尾这么多秒仍无 STOPPED 事件 -> 判定播完（部分设备 GENA 不可靠） */
     private var endOverrunSec = 0L
 
+    /** 最近一次收到 GENA 事件的时间（用于判断"事件是否可靠"以决定是否轮询） */
+    @Volatile
+    private var lastEventAtMs = 0L
+
     val current: NowPlaying? get() = session
     val isActive: Boolean get() = session != null
     val playing: Boolean get() = session?.playing == true
@@ -295,6 +299,26 @@ class NowPlayingSession(
     fun applyEvent(avtEventSubUrl: String, transportState: String?) {
         val np = session ?: return
         if (np.avt.eventSubUrl != avtEventSubUrl) return // 不是当前播放设备/服务
+        lastEventAtMs = System.currentTimeMillis()
+        applyTransportState(transportState)
+    }
+
+    /**
+     * 兜底轮询拿到的传输状态（GetTransportInfo）。
+     * 与事件走同一条判定逻辑 —— 事件不可靠时靠它保持状态正确。
+     */
+    fun applyPolledTransportState(transportState: String?) {
+        if (session == null) return
+        applyTransportState(transportState)
+    }
+
+    /** 距上次收到 GENA 事件的毫秒数（Long.MAX_VALUE = 从没收到过） */
+    fun millisSinceLastEvent(): Long =
+        if (lastEventAtMs == 0L) Long.MAX_VALUE else System.currentTimeMillis() - lastEventAtMs
+
+    /** 传输状态判定：事件与轮询共用同一实现（含"自然播完"识别） */
+    private fun applyTransportState(transportState: String?) {
+        val np = session ?: return
         transportState?.let { state ->
             val newPlaying = state == "PLAYING"
             if (newPlaying) suppressEndUntilPlaying = false // 见到真实播放，解除屏蔽

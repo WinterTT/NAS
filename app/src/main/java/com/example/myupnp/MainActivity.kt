@@ -348,6 +348,26 @@ class MainActivity : AppCompatActivity() {
         showPage(pageLibrary)
         vm.prepareRestoredQueue() // 恢复上次没播完的"待播列表"
 
+        // 首次使用引导（只弹一次）
+        val onboardPrefs = getSharedPreferences("ui_onboarding", MODE_PRIVATE)
+        if (!onboardPrefs.getBoolean("shown_v1", false)) {
+            mainHandler.post {
+                AlertDialog.Builder(this)
+                    .setTitle("三步开始使用")
+                    .setMessage(
+                        "1）点右上角「开始扫描」，发现局域网里的音箱 / 电视 / 媒体服务器\n" +
+                            "2）在「媒体库」点开一台服务器，翻目录挑歌（也可以推手机里的本地文件）\n" +
+                            "3）选一台设备推送播放；之后在「播放」页切歌、调音量、看队列\n\n" +
+                            "提示：需要「附近的设备」权限用于局域网发现；本应用不会上传任何数据。"
+                    )
+                    .setCancelable(false)
+                    .setPositiveButton("知道了") { _, _ ->
+                        onboardPrefs.edit().putBoolean("shown_v1", true).apply()
+                    }
+                    .show()
+            }
+        }
+
         // ===== MVVM：UI 观察 ViewModel 状态（第 1+2 批） =====
         // 通用 UI 状态：扫描按钮/状态栏/正在播放控制条
         lifecycleScope.launch {
@@ -623,9 +643,10 @@ class MainActivity : AppCompatActivity() {
         val listAdapter = ArrayAdapter(this, android.R.layout.simple_list_item_1, labels)
         listView.adapter = listAdapter
 
-        fun fillLoading(text: String) {
+        fun fillLoading(text: String, retryAction: (() -> Unit)? = null) {
             labels.clear(); rowActions.clear()
-            labels.add(text); rowActions.add {}
+            labels.add(if (retryAction != null) "$text\n（点这里重试）" else text)
+            rowActions.add(retryAction ?: {})
             listAdapter.notifyDataSetChanged()
         }
 
@@ -642,7 +663,7 @@ class MainActivity : AppCompatActivity() {
                         Log.e(TAG, "[CDS!] Browse 失败 objectId=$objectId: ${out.error}")
                         appendLog("!! Browse 失败: ${out.error}")
                         if (out.rawSnippet.isNotBlank()) appendLog("   响应片段: ${out.rawSnippet}")
-                        fillLoading("Browse 失败：${out.error}")
+                        fillLoading("Browse 失败：${out.error}") { reload() }
                         return@post
                     }
                     if (out.objects.isEmpty()) {
@@ -1257,8 +1278,35 @@ class MainActivity : AppCompatActivity() {
                     // 操作了这台设备 -> 自动订阅其全部服务（之后别处操作也能同步）
                     vm.activateDeviceSubscription(deviceKey, device.services)
                 }
+            } else {
+                // 失败要能救：给"重试 / 换一台"的出口，而不是只弹个 toast
+                val reason = results.lastOrNull()?.second?.summary() ?: "未知错误"
+                mainHandler.post {
+                    showPushFailedDialog(item, renderer, rc, deviceName, device, deviceKey, reason)
+                }
             }
         }
+    }
+
+    /** 推送失败：重试同一台 / 换一台设备 / 取消 */
+    private fun showPushFailedDialog(
+        item: MediaItem,
+        renderer: UpnpService,
+        rc: UpnpService?,
+        deviceName: String,
+        device: UpnpDevice,
+        deviceKey: String,
+        reason: String
+    ) {
+        AlertDialog.Builder(this)
+            .setTitle("推送失败")
+            .setMessage("《${item.title}》推给 ${deviceName.ifEmpty { "播放器" }} 失败：\n$reason")
+            .setPositiveButton("重试") { _, _ ->
+                pushToRenderer(renderer, deviceName, rc, item, device, deviceKey)
+            }
+            .setNeutralButton("换一台") { _, _ -> playMediaItemFromServer(item) }
+            .setNegativeButton("取消", null)
+            .show()
     }
 
     // ------------------------------------------------------------------
