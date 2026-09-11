@@ -344,7 +344,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 pollSessionFallback(step)
             }
         }
-        // 进程重启后：先把上次的设备快照放进注册表，列表立即可见（随后靠扫描刷新）
+        // 注意：设备快照恢复不能放在 init 里 —— _deviceRows/_uiState 在这之后才初始化，
+        // 恢复会触发 registry 回调 -> rebuildDeviceRows -> 空指针。改由 Activity 显式调用
+        // restoreCachedDevicesOnce()（见 MainActivity.onCreate）。
+    }
+
+    private var cacheRestored = false
+
+    /**
+     * 恢复设备快照（供 Activity 在界面就绪后调用一次）。
+     * 描述里的服务地址都缓存了，恢复后列表立即可见、可直接操作。
+     */
+    fun restoreCachedDevicesOnce() {
+        if (cacheRestored) return
+        cacheRestored = true
         restoreDeviceCache()
     }
 
@@ -701,6 +714,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _uiState = MutableStateFlow(UiState())
     val uiState: StateFlow<UiState> = _uiState.asStateFlow()
 
+    /** 两个 StateFlow 都就绪了（构造期回调要防住） */
+    private var flowsReady = false
+
+    init {
+        flowsReady = true
+    }
+
     fun setStatusOverride(text: String?) {
         _uiState.update { it.copy(statusOverride = text) }
     }
@@ -713,6 +733,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val deviceRows: StateFlow<List<DeviceListItem>> = _deviceRows.asStateFlow()
 
     private fun rebuildDeviceRows() {
+        // 防御：构造期（StateFlow 还没初始化）被 registry 回调打到时直接跳过
+        if (!flowsReady) return
         val mediaServer = ArrayList<Entry>()
         val others = ArrayList<Entry>()
         for (entry in registry.all()) {
