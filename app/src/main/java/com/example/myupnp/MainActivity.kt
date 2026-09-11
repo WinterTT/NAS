@@ -358,9 +358,9 @@ class MainActivity : AppCompatActivity() {
                     .filter { it.isNotBlank() }
                     .joinToString(" · ")
                 view.findViewById<TextView>(R.id.tvQSub).text = sub.ifEmpty { item.resUrl }
-                // 「＋」= 只把这一首加入队列
-                view.findViewById<ImageButton>(R.id.btnRowAdd).setOnClickListener {
-                    vm.queueEnqueue(item)
+                // 「⋮」= 曲目操作菜单（播放 / 插队 / 入队，后续可扩展）
+                view.findViewById<ImageButton>(R.id.btnRowMore).setOnClickListener {
+                    showSongActionsMenu(item)
                 }
                 return view
             }
@@ -371,7 +371,7 @@ class MainActivity : AppCompatActivity() {
         }
         listSearchResults.setOnItemLongClickListener { _, _, p, _ ->
             val target = searchItems.getOrNull(p) ?: return@setOnItemLongClickListener false
-            showSearchItemMenu(target)
+            showSongActionsMenu(target)
             true
         }
         btnSearchEntry.setOnClickListener { showSearchPage(true) }
@@ -436,9 +436,9 @@ class MainActivity : AppCompatActivity() {
                             .filter { it.isNotBlank() }
                             .joinToString(" · ")
                         view.findViewById<TextView>(R.id.tvQSub).text = sub.ifEmpty { row.item.resUrl }
-                        // 「＋」= 只把这一首加入队列（行点击仍是立即播放）
-                        view.findViewById<ImageButton>(R.id.btnRowAdd).setOnClickListener {
-                            vm.queueEnqueue(row.item)
+                        // 「⋮」= 曲目操作菜单（播放 / 插队 / 入队，后续可扩展）
+                        view.findViewById<ImageButton>(R.id.btnRowMore).setOnClickListener {
+                            showSongActionsMenu(row.item)
                         }
                         view
                     }
@@ -476,7 +476,7 @@ class MainActivity : AppCompatActivity() {
                     true
                 }
                 is ServerRow.Song -> {
-                    showSearchItemMenu(row.item)
+                    showSongActionsMenu(row.item)
                     true
                 }
                 null -> false
@@ -1758,16 +1758,25 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    /** 搜索结果项的长按菜单 */
-    private fun showSearchItemMenu(item: MediaItem) {
+    /**
+     * 曲目操作菜单（行尾「⋮」与长按共用）。
+     * 以后要加功能（收藏、详情、下载…）就往这个列表里追加即可。
+     */
+    private fun showSongActionsMenu(item: MediaItem) {
+        val actions = mutableListOf<String>()
+        val handlers = mutableListOf<() -> Unit>()
+
+        actions += "▶ 立即播放"
+        handlers += { playMediaItemFromServer(item) }
+        actions += "⏭ 下一首播放（插队）"
+        handlers += { vm.queuePlayNext(item) }
+        actions += "＋ 加入队列"
+        handlers += { vm.queueEnqueue(item) }
+
         AlertDialog.Builder(this)
             .setTitle(item.title)
-            .setItems(arrayOf("立即播放", "下一首播放（插队）", "加入队列")) { _, which ->
-                when (which) {
-                    0 -> playMediaItemFromServer(item)
-                    1 -> vm.queuePlayNext(item)
-                    2 -> vm.queueEnqueue(item)
-                }
+            .setItems(actions.toTypedArray()) { _, which ->
+                handlers.getOrNull(which)?.invoke()
             }
             .setNegativeButton("取消", null)
             .show()
