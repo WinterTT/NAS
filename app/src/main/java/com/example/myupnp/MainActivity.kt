@@ -35,6 +35,8 @@ import androidx.lifecycle.lifecycleScope
 import com.example.myupnp.device.ScpdLoader
 import com.example.myupnp.dlna.ContentDirectoryClient
 import com.example.myupnp.dlna.DlnaPlayer
+import com.example.myupnp.dlna.MediaKind
+import com.example.myupnp.dlna.MediaKinds
 import com.example.myupnp.model.MediaContainer
 import com.example.myupnp.model.MediaItem
 import com.example.myupnp.model.UpnpAction
@@ -1049,7 +1051,10 @@ class MainActivity : AppCompatActivity() {
             val d = e.device ?: return "（设备信息未就绪）"
             val star = if (vm.isFavoriteEntry(e)) "⭐ " else ""
             val last = if (lastKey != null && vm.rendererKeyOf(d, e.location) == lastKey) "  · 上次" else ""
-            return "$star📺 ${vm.shownNameOf(e)}$last  ${d.modelName}"
+            // 能力标注（已探测到才显示，未知就不写，免得误导）
+            val caps = vm.cachedCapabilities(e)
+            val capText = caps?.icons()?.takeIf { it.isNotEmpty() }?.let { "  $it" } ?: ""
+            return "$star📺 ${vm.shownNameOf(e)}$last$capText  ${d.modelName}"
         }
 
         fun collectRenderers() {
@@ -1114,6 +1119,19 @@ class MainActivity : AppCompatActivity() {
         }
 
         collectRenderers()
+
+        // 预取各设备能力（后台），回来后刷新列表标注
+        for ((e, _) in pairs) {
+            if (vm.cachedCapabilities(e) == null) {
+                vm.fetchCapabilities(e) {
+                    mainHandler.post {
+                        collectRenderers()
+                        listAdapter?.notifyDataSetChanged()
+                        refreshQuick()
+                    }
+                }
+            }
+        }
 
         // 单台设备时：不弹框，直接推（原行为）
         if (pairs.size == 1) {
@@ -1827,24 +1845,12 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
-    /** 图片条目？（按 upnpClass / mime / 扩展名判断） */
-    private fun isImageItem(item: MediaItem): Boolean {
-        val cls = item.upnpClass.lowercase()
-        val mime = item.mime.lowercase()
-        if (cls.contains("imageitem") || mime.startsWith("image/")) return true
-        val path = item.resUrl.substringBefore('?').lowercase()
-        return path.endsWith(".jpg") || path.endsWith(".jpeg") || path.endsWith(".png") ||
-            path.endsWith(".gif") || path.endsWith(".webp") || path.endsWith(".bmp")
-    }
+    /** 图片条目？（按 upnpClass / mime / 扩展名判断，统一走 MediaKinds） */
+    private fun isImageItem(item: MediaItem): Boolean =
+        MediaKinds.of(item.mime, item.upnpClass, item.resUrl) == MediaKind.IMAGE
 
-    private fun isVideoItem(item: MediaItem): Boolean {
-        val cls = item.upnpClass.lowercase()
-        val mime = item.mime.lowercase()
-        if (cls.contains("videoitem") || mime.startsWith("video/")) return true
-        val path = item.resUrl.substringBefore('?').lowercase()
-        return path.endsWith(".mp4") || path.endsWith(".mkv") || path.endsWith(".mov") ||
-            path.endsWith(".avi") || path.endsWith(".webm") || path.endsWith(".3gp")
-    }
+    private fun isVideoItem(item: MediaItem): Boolean =
+        MediaKinds.of(item.mime, item.upnpClass, item.resUrl) == MediaKind.VIDEO
 
     /** 打开本机播放/预览页（音乐/视频/图片共用） */
     private fun openLocalMedia(item: MediaItem) {
@@ -2027,8 +2033,35 @@ class MainActivity : AppCompatActivity() {
         rc: UpnpService?,
         item: MediaItem,
         device: UpnpDevice,
-        deviceKey: String
+        deviceKey: String,
+        checkCapability: Boolean = true
     ) {
+        // 第 12 课：已知设备能力且类型不匹配时，先提醒（仍可继续推）
+        if (checkCapability) {
+            val kind = MediaKinds.of(item.mime, item.upnpClass, item.resUrl)
+            val key = vm.rendererKeyOf(device, deviceKey)
+            val caps = vm.capabilitiesForKey(key)
+            if (kind != MediaKind.UNKNOWN && caps != null && caps.supported && caps.supports(kind) == false) {
+                AlertDialog.Builder(this)
+                    .setTitle("这台设备可能不支持${MediaKinds.label(kind)}")
+                    .setMessage(
+                        "《${item.title}》是${MediaKinds.label(kind)}，而 ${deviceName.ifEmpty { "该设备" }} " +
+                            "声明只能接收：${caps.label()}。\n\n仍要推送吗？（设备也可能实际能播）"
+                    )
+                    .setPositiveButton("仍然推送") { _, _ ->
+                        pushToRenderer(renderer, deviceName, rc, item, device, deviceKey, checkCapability = false)
+                    }
+                    .setNeutralButton("换一台") { _, _ -> playMediaItemFromServer(item) }
+                    .setNegativeButton("取消", null)
+                    .show()
+                return
+            }
+            if (caps == null) {
+                // 顺手探测一次，下次再推就有能力标注了
+                registry[deviceKey]?.let { vm.fetchCapabilities(it) }
+            }
+        }
+
         val targetName = deviceName.ifEmpty { "播放器" }
         appendLog("▶ 从曲库推送 ${item.title} → $targetName\n   地址: ${item.resUrl}")
         controlExecutor.execute {

@@ -16,6 +16,7 @@ import com.example.myupnp.core.FeatureGate
 import com.example.myupnp.core.FeatureId
 import com.example.myupnp.device.ScpdLoader
 import com.example.myupnp.dlna.ContentDirectoryClient
+import com.example.myupnp.dlna.DeviceCapabilities
 import com.example.myupnp.dlna.DlnaPlayer
 import com.example.myupnp.dlna.LastChangeParser
 import com.example.myupnp.gena.EventProperties
@@ -102,6 +103,36 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun rememberLastRenderer(key: String) {
         if (key.isBlank()) return
         rendererPrefs.edit().putString("last", key).apply()
+    }
+
+    // ------------------------------------------------------------------
+    // 第 12 课：渲染器能力（支持音乐/视频/图片？）
+    // ------------------------------------------------------------------
+
+    /** 能力缓存：设备键 -> 能力（避免每次都发 SOAP） */
+    private val capsCache = HashMap<String, DeviceCapabilities.Capabilities>()
+
+    fun capabilitiesForKey(key: String): DeviceCapabilities.Capabilities? = capsCache[key]
+
+    fun cachedCapabilities(entry: Entry): DeviceCapabilities.Capabilities? =
+        capsCache[rendererKeyOf(entry.device, entry.location)]
+
+    /** 后台查询某台设备的能力，结果回主线程 */
+    fun fetchCapabilities(entry: Entry, onDone: ((DeviceCapabilities.Capabilities) -> Unit)? = null) {
+        val device = entry.device ?: return
+        val key = rendererKeyOf(device, entry.location)
+        controlExecutor.execute {
+            val caps = DeviceCapabilities.query(device)
+            mainHandler.post {
+                capsCache[key] = caps
+                Log.i(
+                    TAG,
+                    "[CAP] ${shownNameOf(entry)} 支持：${caps.label()}" +
+                        if (caps.supported) "（${caps.sinkProtocols.size} 条协议）" else "（${caps.note}）"
+                )
+                onDone?.invoke(caps)
+            }
+        }
     }
 
     // ------------------------------------------------------------------
