@@ -94,6 +94,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var tvServerStatus: TextView
     private lateinit var tvServerEmpty: TextView
     private lateinit var listServer: ListView
+    private lateinit var scopeRow: View
     private lateinit var btnTabAlbums: Button
     private lateinit var btnTabArtists: Button
     private lateinit var btnTabSongs: Button
@@ -290,6 +291,7 @@ class MainActivity : AppCompatActivity() {
         tvServerStatus = findViewById(R.id.tvServerStatus)
         tvServerEmpty = findViewById(R.id.tvServerEmpty)
         listServer = findViewById(R.id.listServer)
+        scopeRow = findViewById(R.id.scopeRow)
         btnTabAlbums = findViewById(R.id.btnTabAlbums)
         btnTabArtists = findViewById(R.id.btnTabArtists)
         btnTabSongs = findViewById(R.id.btnTabSongs)
@@ -1486,13 +1488,14 @@ class MainActivity : AppCompatActivity() {
         refreshServerRows()
     }
 
-    /** 分类切换按钮的选中态样式（分类层不显示 Tab） */
+    /** 分类 Tab 与"全部播放/入队"只在选中具体分类后才出现（分类总览页保持干净） */
     private fun updateServerTabs() {
-        val showTabs = serverStage >= 1
-        val tabVisibility = if (showTabs) View.VISIBLE else View.GONE
-        btnTabAlbums.visibility = tabVisibility
-        btnTabArtists.visibility = tabVisibility
-        btnTabSongs.visibility = tabVisibility
+        val insideCategory = serverStage >= 1
+        val chromeVisibility = if (insideCategory) View.VISIBLE else View.GONE
+        btnTabAlbums.visibility = chromeVisibility
+        btnTabArtists.visibility = chromeVisibility
+        btnTabSongs.visibility = chromeVisibility
+        scopeRow.visibility = chromeVisibility
 
         fun style(btn: Button, active: Boolean) {
             btn.setBackgroundResource(if (active) R.drawable.bg_pill_primary else R.drawable.bg_pill_ghost)
@@ -1529,12 +1532,6 @@ class MainActivity : AppCompatActivity() {
             serverAdapter.notifyDataSetChanged()
             tvServerEmpty.visibility = if (serverRows.isEmpty()) View.VISIBLE else View.GONE
             tvServerEmpty.text = "索引里没有分类信息\n可以点右上「文件夹」直接浏览，或重新建立索引"
-
-            val scopeCount = serverPlayScopeSongs().size
-            btnPlayAll.text = "▶ 全部播放（$scopeCount）"
-            btnQueueAll.text = "＋ 全部入队（$scopeCount）"
-            btnPlayAll.isEnabled = scopeCount > 0
-            btnQueueAll.isEnabled = scopeCount > 0
             return
         }
 

@@ -778,12 +778,15 @@
                 android:textColor="@color/text_secondary"
                 android:textSize="12sp" />
 
-            <!-- 整批操作：全部播放 / 全部入队（作用于当前所见范围） -->
+            <!-- 整批操作：全部播放 / 全部入队（进入具体分类后才显示） -->
             <LinearLayout
+                android:id="@+id/scopeRow"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="8dp"
-                android:orientation="horizontal">
+                android:orientation="horizontal"
+                android:visibility="gone"
+                tools:visibility="visible">
 
                 <androidx.appcompat.widget.AppCompatButton
                     android:id="@+id/btnPlayAll"
