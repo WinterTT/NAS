@@ -34,6 +34,7 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.lifecycleScope
 import com.example.myupnp.device.ScpdLoader
 import com.example.myupnp.dlna.ContentDirectoryClient
+import com.example.myupnp.dlna.DeviceCapabilities
 import com.example.myupnp.dlna.DlnaPlayer
 import com.example.myupnp.dlna.MediaKind
 import com.example.myupnp.dlna.MediaKinds
@@ -1051,10 +1052,10 @@ class MainActivity : AppCompatActivity() {
             val d = e.device ?: return "（设备信息未就绪）"
             val star = if (vm.isFavoriteEntry(e)) "⭐ " else ""
             val last = if (lastKey != null && vm.rendererKeyOf(d, e.location) == lastKey) "  · 上次" else ""
-            // 能力标注（已探测到才显示，未知就不写，免得误导）
+            // 能力标注：明确=🎵🎬🖼，推测=带 ?，未知=❔
             val caps = vm.cachedCapabilities(e)
-            val capText = caps?.icons()?.takeIf { it.isNotEmpty() }?.let { "  $it" } ?: ""
-            return "$star📺 ${vm.shownNameOf(e)}$last$capText  ${d.modelName}"
+            val capText = caps?.icons()?.let { "  $it" } ?: "  ❔"
+            return "$star${deviceIconOf(d)} ${vm.shownNameOf(e)}$last$capText  ${d.modelName}"
         }
 
         fun collectRenderers() {
@@ -1180,7 +1181,16 @@ class MainActivity : AppCompatActivity() {
         }
         listView.setOnItemLongClickListener { _, _, which, _ ->
             val (e, _) = pairs.getOrNull(which) ?: return@setOnItemLongClickListener false
-            showDeviceManageDialog(e, e.device)
+            AlertDialog.Builder(this)
+                .setTitle(vm.shownNameOf(e))
+                .setItems(arrayOf("⚙ 设备管理（收藏 / 重命名）", "ℹ 查看支持格式")) { _, pick ->
+                    when (pick) {
+                        0 -> showDeviceManageDialog(e, e.device)
+                        1 -> showCapabilitiesDialog(e)
+                    }
+                }
+                .setNegativeButton("取消", null)
+                .show()
             // 管理（收藏/重命名）后刷新标签与快速按钮
             mainHandler.postDelayed({
                 collectRenderers()
@@ -1888,6 +1898,50 @@ class MainActivity : AppCompatActivity() {
     /** 列表行点击路由：图片直接本地预览，音视频仍是推送播放 */
     private fun handleItemTap(item: MediaItem) {
         if (isImageItem(item)) openLocalMedia(item) else playMediaItemFromServer(item)
+    }
+
+    /** 设备类型图标（音箱/电视/其他），比清一色 📺 更易分辨 */
+    private fun deviceIconOf(d: UpnpDevice): String {
+        val text = (d.friendlyName + " " + d.modelName + " " + d.manufacturer + " " + d.deviceType)
+            .lowercase()
+        return when {
+            text.contains("soundbar") || text.contains("音箱") || text.contains("speaker") ||
+                text.contains("回音壁") || text.contains("audio") || text.contains("music") -> "🔊"
+            text.contains("tv") || text.contains("电视") || text.contains("display") ||
+                text.contains("monitor") || text.contains("screen") -> "📺"
+            else -> "🎛"
+        }
+    }
+
+    /** 查看某台设备声明的"可接收格式"（含探测失败原因） */
+    private fun showCapabilitiesDialog(entry: Entry) {
+        val cached = vm.cachedCapabilities(entry)
+        if (cached == null) {
+            Toast.makeText(this, "正在探测该设备支持的格式…", Toast.LENGTH_SHORT).show()
+            vm.fetchCapabilities(entry) { caps -> showCapabilitiesDialogNow(entry, caps) }
+            return
+        }
+        showCapabilitiesDialogNow(entry, cached)
+    }
+
+    private fun showCapabilitiesDialogNow(entry: Entry, caps: DeviceCapabilities.Capabilities) {
+        val text = buildString {
+            appendLine("支持：${caps.label()}")
+            if (caps.note.isNotBlank()) appendLine("说明：${caps.note}")
+            appendLine()
+            if (caps.sinkProtocols.isNotEmpty()) {
+                appendLine("设备声明的可接收格式（前 20 条）：")
+                caps.sinkProtocols.take(20).forEach { appendLine("· $it") }
+                if (caps.sinkProtocols.size > 20) appendLine("…共 ${caps.sinkProtocols.size} 条")
+            } else {
+                append("设备没有返回格式清单（无法精确判断，推送时会照常尝试）。")
+            }
+        }
+        AlertDialog.Builder(this)
+            .setTitle(vm.shownNameOf(entry))
+            .setMessage(text)
+            .setPositiveButton("好", null)
+            .show()
     }
 
     /** 选择一台媒体服务器（0/1/多台三种情况） */

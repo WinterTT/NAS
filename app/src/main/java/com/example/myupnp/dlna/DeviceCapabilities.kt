@@ -27,6 +27,8 @@ object DeviceCapabilities {
         val sinkProtocols: List<String> = emptyList(),
         /** 是否成功拿到并解析（false = 未知，不能据此拦截） */
         val supported: Boolean = false,
+        /** true = 设备没给清单，这里按设备类型"推测"的结果（仅供参考，不拦截） */
+        val inferred: Boolean = false,
         val note: String = ""
     ) {
         /** true/false = 明确支持/不支持；null = 未知 */
@@ -38,32 +40,40 @@ object DeviceCapabilities {
             else -> null
         }
 
-        /** 展示用：音乐/视频/图片 */
-        fun label(): String = when {
-            !supported -> "支持格式未知"
-            else -> buildList {
+        /** 展示用：音乐/视频/图片（推测结果会标注） */
+        fun label(): String {
+            val known = buildList {
                 if (audio) add("音乐")
                 if (video) add("视频")
                 if (image) add("图片")
-            }.joinToString(" / ").ifEmpty { "未声明可播放格式" }
+            }.joinToString(" / ")
+            return when {
+                supported -> known.ifEmpty { "未声明可播放格式" }
+                inferred && known.isNotEmpty() -> "$known（推测）"
+                else -> "未知（设备未返回格式清单）"
+            }
         }
 
-        /** 紧凑图标（列表里用） */
-        fun icons(): String = when {
-            !supported -> ""
-            else -> buildString {
+        /** 紧凑图标（列表里用）：明确=🎵🎬🖼，推测=带 ?，完全未知=❔ */
+        fun icons(): String {
+            val base = buildString {
                 if (audio) append("🎵")
                 if (video) append("🎬")
                 if (image) append("🖼")
             }
+            return when {
+                supported -> base.ifEmpty { "🚫" }
+                inferred && base.isNotEmpty() -> "$base?"
+                else -> "❔"
+            }
         }
     }
 
-    /** 查询一台渲染器支持接收的媒体类型；失败返回"未知" */
+    /** 查询一台渲染器支持接收的媒体类型；失败时按设备类型给出"推测"结果 */
     fun query(device: UpnpDevice?): Capabilities {
         if (device == null) return Capabilities(note = "设备信息未就绪")
         val cm = connectionManagerOf(device)
-            ?: return Capabilities(note = "该设备没有 ConnectionManager 服务，无法探测")
+            ?: return infer(device, "该设备没有 ConnectionManager 服务（可能在嵌入式子设备里），以下为按类型推测")
         val result = runCatching {
             SoapCaller.call(
                 controlUrl = cm.controlUrl,
@@ -71,16 +81,16 @@ object DeviceCapabilities {
                 actionName = "GetProtocolInfo",
                 args = emptyMap()
             )
-        }.getOrElse { return Capabilities(note = "GetProtocolInfo 异常: ${it.message}") }
+        }.getOrElse { return infer(device, "GetProtocolInfo 异常: ${it.message}") }
 
         if (!result.success) {
-            return Capabilities(note = "GetProtocolInfo 失败（设备可能未实现）: ${result.summary()}")
+            return infer(device, "GetProtocolInfo 失败（设备可能未实现）：${result.summary()}")
         }
         val sink = Regex(
             "<SinkProtocolInfo>\\s*(.*?)\\s*</SinkProtocolInfo>",
             RegexOption.DOT_MATCHES_ALL
         ).find(result.body)?.groupValues?.get(1).orEmpty()
-        if (sink.isBlank()) return Capabilities(note = "设备没有声明可接收的格式")
+        if (sink.isBlank()) return infer(device, "设备返回了空的可接收格式清单")
 
         val protocols = sink.split(',').map { it.trim() }.filter { it.isNotEmpty() }
         var audio = false
@@ -110,6 +120,40 @@ object DeviceCapabilities {
             image = image,
             sinkProtocols = protocols,
             supported = true
+        )
+    }
+
+    /**
+     * 设备没给格式清单时的兜底推测（仅展示用，不用于拦截）：
+     *   - MediaRenderer：DLNA 渲染器一般能放音频与视频
+     *   - 有 RenderingControl：至少是音频设备
+     *   - 名字/型号含 TV/电视/Display：大概率能放视频
+     */
+    fun infer(device: UpnpDevice?, reason: String): Capabilities {
+        if (device == null) return Capabilities(note = reason)
+        val text = (device.deviceType + " " + device.friendlyName + " " + device.modelName).lowercase()
+        var audio = false
+        var video = false
+        var image = false
+        if (device.deviceType.contains("MediaRenderer", ignoreCase = true)) {
+            audio = true
+            video = true
+        }
+        if (device.services.any { it.serviceType.contains("RenderingControl") }) audio = true
+        if (text.contains("tv") || text.contains("电视") || text.contains("display") ||
+            text.contains("monitor") || text.contains("screen")
+        ) {
+            video = true
+        }
+        // 电视类设备通常也能看图片
+        if (video && (text.contains("tv") || text.contains("电视"))) image = true
+        return Capabilities(
+            audio = audio,
+            video = video,
+            image = image,
+            supported = false,
+            inferred = audio || video || image,
+            note = reason
         )
     }
 
