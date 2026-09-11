@@ -82,6 +82,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     /** 播放历史（第 7 课 D：最近播放，持久化） */
     val playHistory = PlayHistory(getApplication())
 
+    /** 设备列表快照缓存（切后台/进程被杀后回来，列表不再空白） */
+    private val deviceCache = DeviceCache(getApplication())
+
+    /** 应用状态（扫描意图等） */
+    private val appStatePrefs =
+        getApplication<Application>().getSharedPreferences("app_state", Context.MODE_PRIVATE)
+
     /** 上次推送选中的播放器（记住默认，下次优先） */
     private val rendererPrefs =
         getApplication<Application>().getSharedPreferences("renderer_memory", Context.MODE_PRIVATE)
@@ -332,6 +339,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 pollSessionFallback(step)
             }
         }
+        // 进程重启后：先把上次的设备快照放进注册表，列表立即可见（随后靠扫描刷新）
+        restoreDeviceCache()
+    }
+
+    /** 恢复设备快照（描述里的服务地址都缓存了，恢复后可直接操作） */
+    private fun restoreDeviceCache() {
+        val cached = runCatching { deviceCache.load() }.getOrDefault(emptyList())
+        if (cached.isEmpty()) return
+        registry.restore(cached)
+        Log.i(TAG, "[CACHE] 已恢复设备快照 ${cached.size} 台（等待扫描刷新）")
     }
 
     /**
@@ -416,6 +433,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     /** 开始扫描：拿组播锁、起引擎、起事件服务器、启心跳协程 */
     fun startScan() {
         userWantsScan = true
+        persistScanWanted(true) // 切后台/杀进程后回来能自动续扫
         Log.i(TAG, "[SCAN] 开始扫描，请求 MulticastLock")
         multicastLock = try {
             val wifi = getApplication<Application>()
@@ -445,6 +463,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     /** 手动停止扫描：以后网络恢复也不自动续扫 */
     fun stopScan() {
         userWantsScan = false
+        persistScanWanted(false)
         Log.i(TAG, "[SCAN] 停止扫描")
         stopHeartbeat()
         discovery.stop()
@@ -706,6 +725,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         appendGroup("其他设备（${others.size}）", others)
         _deviceRows.value = rows
         _uiState.update { it.copy(deviceCount = registry.size) }
+        // 存一份快照：切后台/进程被杀回来时，先把这份列表显示出来
+        deviceCache.save(registry.all())
         // 设备列表每次变化后，试着恢复"上次播放"的控制条（设备刚回来时）
         restoreLastSessionIfDeviceBack()
     }
@@ -1240,9 +1261,34 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     // 清理
     // ------------------------------------------------------------------
 
-    /** 供 Activity 在 onDestroy 时调用（通知网络状态结束） */
+    // ------------------------------------------------------------------
+    // 前后台切换 / 恢复
+    // ------------------------------------------------------------------
+
+    /** 持久化"用户想扫描"的意图（切后台、进程被杀后回来要能续上） */
+    private fun persistScanWanted(wanted: Boolean) =
+        appStatePrefs.edit().putBoolean(KEY_SCAN_WANTED, wanted).apply()
+
+    private fun isScanWantedPersisted(): Boolean =
+        appStatePrefs.getBoolean(KEY_SCAN_WANTED, false)
+
+    /**
+     * Activity onStart（回到前台）调用：
+     * 之前处于"扫描中"的话自动续扫 —— 设备列表不用用户再点一次。
+     */
+    fun resumeAfterReturn() {
+        if (discovery.isRunning()) return
+        val wanted = userWantsScan || isScanWantedPersisted()
+        if (!wanted) return
+        Log.i(TAG, "[SCAN] 回到前台，自动续扫并刷新设备列表")
+        startScan()
+    }
+
+    /**
+     * 供 Activity.onDestroy 调用：只释放资源（组播锁/引擎/回调服务器），
+     * **不改用户的扫描意图** —— 否则切一次后台回来就"数据全没了"。
+     */
     fun onHostDestroyed() {
-        userWantsScan = false
         stopHeartbeat()
         discovery.stop()
         multicastLock?.let { runCatching { it.release() } }
@@ -1250,6 +1296,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         subManager.unsubscribeAll()
         eventServer.stop()
         fileServer.stop()
+        // 设备列表/会话都留在内存与快照里，回来即可见
     }
 
     override fun onCleared() {
@@ -1285,5 +1332,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         // 队列持久化
         private const val KEY_QUEUE = "pending"
+
+        // 应用状态：用户是否处于"扫描中"（回前台自动续扫）
+        private const val KEY_SCAN_WANTED = "scan_wanted"
     }
 }

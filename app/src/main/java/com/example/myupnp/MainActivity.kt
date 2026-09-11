@@ -704,6 +704,17 @@ class MainActivity : AppCompatActivity() {
         vm.stopScan()
     }
 
+    override fun onStart() {
+        super.onStart()
+        // 回到前台：之前是"扫描中"就自动续扫，设备列表/分类页数据不必重新点一遍
+        vm.resumeAfterReturn()
+        refreshLibraryRows()
+        if (::searchAdapter.isInitialized && pageSearch.visibility == View.VISIBLE) {
+            updateSearchStatus()
+            runLocalSearch(etSearch.text.toString())
+        }
+    }
+
     override fun onDestroy() {
         runCatching {
             val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager

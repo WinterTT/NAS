@@ -146,6 +146,23 @@ class DeviceRegistry(
         listener.onRegistryChanged()
     }
 
+    /**
+     * 恢复缓存快照（切后台/进程被杀后回来时，先用旧数据把列表撑起来）。
+     * 已存在的 LOCATION 不覆盖；恢复后照常靠 SSDP 应答刷新成最新状态。
+     */
+    fun restore(cached: List<Entry>) {
+        var changed = false
+        for (e in cached) {
+            if (entries.containsKey(e.location)) continue
+            entries[e.location] = e
+            changed = true
+        }
+        if (changed) {
+            Log.i(TAG, "[DEVICE~] 从缓存恢复 ${cached.size} 台设备快照")
+            listener.onRegistryChanged()
+        }
+    }
+
     // ------------------------------------------------------------------
     // 描述拉取（后台线程，完成回主线程）
     // ------------------------------------------------------------------
