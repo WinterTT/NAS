@@ -133,7 +133,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
         Log.i(TAG, "[INDEX] 开始索引: ${shownNameOf(entry)}")
         postMessage("开始建立索引：${shownNameOf(entry)}")
-        indexer.start(deviceIdOf(entry), cds)
+        indexer.start(serverIndexKeyOf(entry), cds)
     }
 
     fun stopIndexing() = indexer.stop()
@@ -147,20 +147,32 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     // ---- 分类浏览（专辑 / 歌手 / 歌曲）：索引过的服务器走这套 ----
 
+    /**
+     * 索引归属键：优先 UDN；没有 UDN 的服务器退回"名称+型号"，
+     * 避免用 LOCATION（含 IP/端口，重启会变）导致同一台被索引成两份。
+     */
+    fun serverIndexKeyOf(entry: Entry): String {
+        val udn = entry.device?.udn?.trim().orEmpty()
+        if (udn.isNotEmpty()) return udn
+        val name = entry.device?.friendlyName?.trim().orEmpty()
+        val model = entry.device?.modelName?.trim().orEmpty()
+        return if (name.isNotEmpty()) "name:$name|$model" else entry.location
+    }
+
     /** 这台服务器索引里有多少首（>0 表示"已建索引"） */
-    fun indexSongCount(entry: Entry): Int = indexStore.countForServer(deviceIdOf(entry))
+    fun indexSongCount(entry: Entry): Int = indexStore.countForServer(serverIndexKeyOf(entry))
 
-    fun indexAlbums(entry: Entry) = indexStore.albums(deviceIdOf(entry))
+    fun indexAlbums(entry: Entry) = indexStore.albums(serverIndexKeyOf(entry))
 
-    fun indexArtists(entry: Entry) = indexStore.artists(deviceIdOf(entry))
+    fun indexArtists(entry: Entry) = indexStore.artists(serverIndexKeyOf(entry))
 
-    fun indexSongs(entry: Entry) = indexStore.songs(deviceIdOf(entry))
+    fun indexSongs(entry: Entry) = indexStore.songs(serverIndexKeyOf(entry))
 
     fun indexSongsByAlbum(entry: Entry, album: String) =
-        indexStore.songsByAlbum(deviceIdOf(entry), album)
+        indexStore.songsByAlbum(serverIndexKeyOf(entry), album)
 
     fun indexSongsByArtist(entry: Entry, artist: String) =
-        indexStore.songsByArtist(deviceIdOf(entry), artist)
+        indexStore.songsByArtist(serverIndexKeyOf(entry), artist)
 
     /** 批量入队（整张专辑 / 某歌手全部）；只弹一条提示，不刷屏 */
     fun queueEnqueueAll(items: List<MediaItem>, label: String) {
@@ -171,7 +183,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /** 清掉某台服务器的目录扫描状态（= 下次 startIndexing 会重新扫） */
-    fun resetServerIndex(entry: Entry) = indexStore.resetServer(deviceIdOf(entry))
+    fun resetServerIndex(entry: Entry) = indexStore.resetServer(serverIndexKeyOf(entry))
 
     fun clearIndex() = indexStore.clearAll()
 

@@ -69,6 +69,9 @@ class MediaIndexStore(context: Context) :
             """.trimIndent()
         )
         db.execSQL("CREATE INDEX idx_items_title ON items(title)")
+        // 同一首歌的"文件地址"是唯一的：多个浏览视图（所有音乐/专辑/歌手/文件夹）
+        // 会给出不同 objectID，但 res_url 相同 —— 用唯一索引保证一个文件只留一条
+        db.execSQL("CREATE UNIQUE INDEX idx_items_res ON items(server_udn, res_url)")
         db.execSQL(
             """
             CREATE TABLE containers(
@@ -85,10 +88,17 @@ class MediaIndexStore(context: Context) :
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        // 索引是"可再生数据"，升级直接重建
-        db.execSQL("DROP TABLE IF EXISTS items")
-        db.execSQL("DROP TABLE IF EXISTS containers")
-        onCreate(db)
+        // v1 -> v2：按 res_url 去重（清掉已经重复的旧索引），並建立唯一索引
+        if (oldVersion < 2) {
+            db.execSQL(
+                """
+                DELETE FROM items WHERE rowid NOT IN (
+                  SELECT MIN(rowid) FROM items GROUP BY server_udn, res_url
+                )
+                """.trimIndent()
+            )
+            db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS idx_items_res ON items(server_udn, res_url)")
+        }
     }
 
     // ------------------------------------------------------------------
@@ -163,12 +173,13 @@ class MediaIndexStore(context: Context) :
     // 查询（搜索 UI 调用）
     // ------------------------------------------------------------------
 
-    /** 本地搜索：标题 / 歌手 / 专辑 模糊匹配（只返回可播放条目） */
+    /** 本地搜索：标题 / 歌手 / 专辑 模糊匹配（只返回可播放条目；跨服务器按 res_url 去重） */
     fun search(keyword: String, limit: Int = 200): List<IndexEntry> {
         val kw = keyword.trim()
         if (kw.isEmpty()) return emptyList()
         val like = "%$kw%"
-        val out = ArrayList<IndexEntry>()
+        // 用 LinkedHashMap 按 resUrl 去重（同一文件被多台服务器/多个视图暴露时只留一条）
+        val unique = LinkedHashMap<String, IndexEntry>()
         readableDatabase.rawQuery(
             """
             SELECT server_udn, object_id, title, artist, album, upnp_class, res_url, mime, art_url
@@ -180,22 +191,21 @@ class MediaIndexStore(context: Context) :
             arrayOf(like, like, like, limit.toString())
         ).use { c ->
             while (c.moveToNext()) {
-                out.add(
-                    IndexEntry(
-                        serverUdn = c.getString(0),
-                        objectId = c.getString(1),
-                        title = c.getString(2) ?: "",
-                        artist = c.getString(3) ?: "",
-                        album = c.getString(4) ?: "",
-                        upnpClass = c.getString(5) ?: "",
-                        resUrl = c.getString(6) ?: "",
-                        mime = c.getString(7) ?: "",
-                        artUrl = c.getString(8) ?: ""
-                    )
+                val entry = IndexEntry(
+                    serverUdn = c.getString(0),
+                    objectId = c.getString(1),
+                    title = c.getString(2) ?: "",
+                    artist = c.getString(3) ?: "",
+                    album = c.getString(4) ?: "",
+                    upnpClass = c.getString(5) ?: "",
+                    resUrl = c.getString(6) ?: "",
+                    mime = c.getString(7) ?: "",
+                    artUrl = c.getString(8) ?: ""
                 )
+                unique.putIfAbsent(entry.resUrl, entry)
             }
         }
-        return out
+        return unique.values.toList().take(limit)
     }
 
     fun stats(): Stats {
@@ -325,6 +335,6 @@ class MediaIndexStore(context: Context) :
 
     private companion object {
         const val DB_NAME = "media_index.db"
-        const val DB_VERSION = 1
+        const val DB_VERSION = 2
     }
 }
