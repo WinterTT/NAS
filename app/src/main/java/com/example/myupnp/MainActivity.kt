@@ -84,6 +84,35 @@ class MainActivity : AppCompatActivity() {
     private lateinit var searchAdapter: android.widget.BaseAdapter
     private val searchItems = ArrayList<MediaItem>()
     private var indexDialog: AlertDialog? = null
+
+    // ===== 服务器曲库（索引后的分类浏览） =====
+    private lateinit var pageServer: View
+    private lateinit var btnServerBack: Button
+    private lateinit var btnServerBrowse: Button
+    private lateinit var tvServerTitle: TextView
+    private lateinit var tvServerStatus: TextView
+    private lateinit var tvServerEmpty: TextView
+    private lateinit var listServer: ListView
+    private lateinit var btnTabAlbums: Button
+    private lateinit var btnTabArtists: Button
+    private lateinit var btnTabSongs: Button
+    private lateinit var serverAdapter: android.widget.BaseAdapter
+
+    /** 分类列表的一行：分组（专辑/歌手）或歌曲 */
+    private sealed class ServerRow {
+        data class Group(val title: String, val sub: String) : ServerRow()
+        data class Song(val item: MediaItem) : ServerRow()
+    }
+
+    private val serverRows = ArrayList<ServerRow>()
+    private var serverEntry: Entry? = null
+    private var serverCds: UpnpService? = null
+
+    /** 0=专辑 1=歌手 2=歌曲 */
+    private var serverMode = 0
+
+    /** 二级过滤：非 null 表示正在看"某专辑/某歌手"的歌曲列表 */
+    private var serverFilter: String? = null
     private lateinit var bottomNav: com.google.android.material.bottomnavigation.BottomNavigationView
     private var lastTabBeforePlay = R.id.nav_library
     private var currentTabId = R.id.nav_library
@@ -242,6 +271,16 @@ class MainActivity : AppCompatActivity() {
         listSearchResults = findViewById(R.id.listSearchResults)
         btnSearchServer = findViewById(R.id.btnSearchServer)
         btnBuildIndex = findViewById(R.id.btnBuildIndex)
+        pageServer = findViewById(R.id.pageServer)
+        btnServerBack = findViewById(R.id.btnServerBack)
+        btnServerBrowse = findViewById(R.id.btnServerBrowse)
+        tvServerTitle = findViewById(R.id.tvServerTitle)
+        tvServerStatus = findViewById(R.id.tvServerStatus)
+        tvServerEmpty = findViewById(R.id.tvServerEmpty)
+        listServer = findViewById(R.id.listServer)
+        btnTabAlbums = findViewById(R.id.btnTabAlbums)
+        btnTabArtists = findViewById(R.id.btnTabArtists)
+        btnTabSongs = findViewById(R.id.btnTabSongs)
         bottomNav = findViewById(R.id.bottomNav)
         nowPlayingBar = findViewById(R.id.nowPlayingBar)
         tvPlayEmpty = findViewById(R.id.tvPlayEmpty)
@@ -348,6 +387,73 @@ class MainActivity : AppCompatActivity() {
             Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
             updateSearchStatus()
         }
+
+        // ===== 服务器曲库：分类浏览（专辑 / 歌手 / 歌曲） =====
+        serverAdapter = object : android.widget.BaseAdapter() {
+            override fun getCount(): Int = serverRows.size
+            override fun getItem(p: Int): Any = serverRows[p]
+            override fun getItemId(p: Int): Long = p.toLong()
+            override fun getView(p: Int, convert: View?, parent: ViewGroup): View {
+                val view = convert
+                    ?: layoutInflater.inflate(R.layout.item_queue_row, parent, false)
+                val row = serverRows[p]
+                val titleView = view.findViewById<TextView>(R.id.tvQIndex)
+                val nameView = view.findViewById<TextView>(R.id.tvQTitle)
+                val subView = view.findViewById<TextView>(R.id.tvQSub)
+                when (row) {
+                    is ServerRow.Group -> {
+                        titleView.text = ""
+                        nameView.text = row.title
+                        subView.text = row.sub
+                    }
+                    is ServerRow.Song -> {
+                        titleView.text = (p + 1).toString()
+                        nameView.text = row.item.title
+                        val sub = listOf(row.item.artist, row.item.album)
+                            .filter { it.isNotBlank() }
+                            .joinToString(" · ")
+                        subView.text = sub.ifEmpty { row.item.resUrl }
+                    }
+                }
+                return view
+            }
+        }
+        listServer.adapter = serverAdapter
+        listServer.setOnItemClickListener { _, _, p, _ ->
+            when (val row = serverRows.getOrNull(p)) {
+                is ServerRow.Group -> {
+                    serverFilter = row.title
+                    refreshServerRows()
+                }
+                is ServerRow.Song -> playMediaItemFromServer(row.item)
+                null -> Unit
+            }
+        }
+        listServer.setOnItemLongClickListener { _, _, p, _ ->
+            when (val row = serverRows.getOrNull(p)) {
+                is ServerRow.Group -> {
+                    showGroupMenu(row.title)
+                    true
+                }
+                is ServerRow.Song -> {
+                    showSearchItemMenu(row.item)
+                    true
+                }
+                null -> false
+            }
+        }
+        btnServerBack.setOnClickListener {
+            if (serverFilter != null) {
+                serverFilter = null
+                refreshServerRows()
+            } else {
+                closeServerPage()
+            }
+        }
+        btnServerBrowse.setOnClickListener { serverCds?.let { showMediaBrowser(it) } }
+        btnTabAlbums.setOnClickListener { switchServerMode(0) }
+        btnTabArtists.setOnClickListener { switchServerMode(1) }
+        btnTabSongs.setOnClickListener { switchServerMode(2) }
         // 迷你条（非按钮区域）点击 -> 打开播放页
         miniNowBar.setOnClickListener { switchTab(R.id.nav_playing) }
 
@@ -412,8 +518,16 @@ class MainActivity : AppCompatActivity() {
         }
         listLibrary.adapter = libraryAdapter
         listLibrary.setOnItemClickListener { _, _, p, _ ->
-            val cds = libraryServers.getOrNull(p)?.second ?: return@setOnItemClickListener
-            showMediaBrowser(cds)
+            val pair = libraryServers.getOrNull(p) ?: return@setOnItemClickListener
+            val (entry, cds) = pair
+            if (vm.indexSongCount(entry) > 0) {
+                openServerPage(entry, cds) // 已建索引：直接进"专辑/歌手/歌曲"分类页
+            } else {
+                Toast.makeText(
+                    this, "长按这台服务器可以建立索引，之后就能按专辑/歌手浏览", Toast.LENGTH_SHORT
+                ).show()
+                showMediaBrowser(cds) // 未建索引：沿用文件夹浏览
+            }
         }
         listLibrary.setOnItemLongClickListener { _, _, p, _ ->
             val entry = libraryServers.getOrNull(p)?.first ?: return@setOnItemLongClickListener false
@@ -1207,9 +1321,10 @@ class MainActivity : AppCompatActivity() {
         refreshMiniBar()
     }
 
-    /** 显示指定页（三页互斥；搜索页随切换收起） */
+    /** 显示指定页（三页互斥；搜索页/服务器页随切换收起） */
     private fun showPage(target: View) {
         pageSearch.visibility = View.GONE
+        pageServer.visibility = View.GONE
         pagePlay.visibility = if (target === pagePlay) View.VISIBLE else View.GONE
         pageLibrary.visibility = if (target === pageLibrary) View.VISIBLE else View.GONE
         pageSettings.visibility = if (target === pageSettings) View.VISIBLE else View.GONE
@@ -1244,6 +1359,147 @@ class MainActivity : AppCompatActivity() {
         controlExecutor.execute {
             DlnaPlayer.setVolume(rc, target.coerceIn(0, 100))
         }
+    }
+
+    // ------------------------------------------------------------------
+    // 服务器曲库：分类浏览（专辑 / 歌手 / 歌曲）
+    // ------------------------------------------------------------------
+
+    /** 打开某台服务器的分类浏览页（索引过的服务器走这里，不再默认弹文件夹） */
+    private fun openServerPage(entry: Entry, cds: UpnpService) {
+        serverEntry = entry
+        serverCds = cds
+        serverMode = 0
+        serverFilter = null
+        pageServer.visibility = View.VISIBLE
+        pageLibrary.visibility = View.GONE
+        pageSearch.visibility = View.GONE
+        tvServerTitle.text = vm.shownNameOf(entry)
+        updateServerTabs()
+        refreshServerRows()
+    }
+
+    private fun closeServerPage() {
+        pageServer.visibility = View.GONE
+        serverEntry = null
+        serverCds = null
+        serverFilter = null
+        showPage(
+            when (currentTabId) {
+                R.id.nav_playing -> pagePlay
+                R.id.nav_settings -> pageSettings
+                else -> pageLibrary
+            }
+        )
+    }
+
+    private fun switchServerMode(mode: Int) {
+        serverMode = mode
+        serverFilter = null
+        updateServerTabs()
+        refreshServerRows()
+    }
+
+    /** 分类切换按钮的选中态样式 */
+    private fun updateServerTabs() {
+        fun style(btn: Button, active: Boolean) {
+            btn.setBackgroundResource(if (active) R.drawable.bg_pill_primary else R.drawable.bg_pill_ghost)
+            btn.setTextColor(
+                ContextCompat.getColor(
+                    this,
+                    if (active) R.color.on_brand else R.color.text_primary
+                )
+            )
+        }
+        style(btnTabAlbums, serverMode == 0)
+        style(btnTabArtists, serverMode == 1)
+        style(btnTabSongs, serverMode == 2)
+    }
+
+    /** 按当前模式/层级刷新列表 */
+    private fun refreshServerRows() {
+        val entry = serverEntry ?: return
+        serverRows.clear()
+        val filter = serverFilter
+
+        when (serverMode) {
+            0 -> { // 专辑
+                if (filter == null) {
+                    val albums = vm.indexAlbums(entry)
+                    albums.forEach { a ->
+                        serverRows.add(
+                            ServerRow.Group(
+                                title = a.album,
+                                sub = listOf(a.artist, "${a.songCount} 首")
+                                    .filter { it.isNotBlank() }
+                                    .joinToString(" · ")
+                            )
+                        )
+                    }
+                    tvServerStatus.text = "专辑 ${albums.size} 张 · 共 ${albums.sumOf { it.songCount }} 首"
+                } else {
+                    val songs = vm.indexSongsByAlbum(entry, filter)
+                    songs.forEach { serverRows.add(ServerRow.Song(it.toMediaItem())) }
+                    tvServerStatus.text = "《$filter》 ${songs.size} 首"
+                }
+            }
+
+            1 -> { // 歌手
+                if (filter == null) {
+                    val artists = vm.indexArtists(entry)
+                    artists.forEach { a ->
+                        serverRows.add(
+                            ServerRow.Group(
+                                title = a.artist,
+                                sub = "${a.songCount} 首 · ${a.albumCount} 张专辑"
+                            )
+                        )
+                    }
+                    tvServerStatus.text =
+                        "歌手 ${artists.size} 位 · 共 ${artists.sumOf { it.songCount }} 首"
+                } else {
+                    val songs = vm.indexSongsByArtist(entry, filter)
+                    songs.forEach { serverRows.add(ServerRow.Song(it.toMediaItem())) }
+                    tvServerStatus.text = "$filter ${songs.size} 首"
+                }
+            }
+
+            else -> { // 歌曲
+                val songs = vm.indexSongs(entry)
+                songs.forEach { serverRows.add(ServerRow.Song(it.toMediaItem())) }
+                tvServerStatus.text = "全部歌曲 ${songs.size} 首（点一首即可推送播放）"
+            }
+        }
+
+        serverAdapter.notifyDataSetChanged()
+        tvServerEmpty.visibility = if (serverRows.isEmpty()) View.VISIBLE else View.GONE
+        tvServerEmpty.text = when {
+            serverMode == 0 && filter == null -> "索引里没有专辑信息\n（有些文件没写专辑标签，可以看「歌曲」页）"
+            serverMode == 1 && filter == null -> "索引里没有歌手信息\n（有些文件没写歌手标签，可以看「歌曲」页）"
+            else -> "这个分类下没有内容"
+        }
+    }
+
+    /** 专辑/歌手分组长按：整批加入队列 / 播放第一首 */
+    private fun showGroupMenu(groupTitle: String) {
+        val entry = serverEntry ?: return
+        val songs = if (serverMode == 0) vm.indexSongsByAlbum(entry, groupTitle)
+        else vm.indexSongsByArtist(entry, groupTitle)
+        if (songs.isEmpty()) {
+            Toast.makeText(this, "这个分组下没有曲目", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val label = if (serverMode == 0) "《$groupTitle》" else groupTitle
+        AlertDialog.Builder(this)
+            .setTitle("$label（${songs.size} 首）")
+            .setItems(arrayOf("全部加入队列", "播放第一首")) { _, which ->
+                when (which) {
+                    0 -> vm.queueEnqueueAll(songs.map { it.toMediaItem() }, label)
+                    1 -> playMediaItemFromServer(songs.first().toMediaItem())
+                }
+            }
+            .setNegativeButton("取消", null)
+            .show()
     }
 
     // ------------------------------------------------------------------

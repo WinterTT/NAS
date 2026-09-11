@@ -145,6 +145,31 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     /** 本地索引搜索（同步，几毫秒级；调用方在主线程即可） */
     fun searchIndex(keyword: String): List<MediaIndexStore.IndexEntry> = indexStore.search(keyword)
 
+    // ---- 分类浏览（专辑 / 歌手 / 歌曲）：索引过的服务器走这套 ----
+
+    /** 这台服务器索引里有多少首（>0 表示"已建索引"） */
+    fun indexSongCount(entry: Entry): Int = indexStore.countForServer(deviceIdOf(entry))
+
+    fun indexAlbums(entry: Entry) = indexStore.albums(deviceIdOf(entry))
+
+    fun indexArtists(entry: Entry) = indexStore.artists(deviceIdOf(entry))
+
+    fun indexSongs(entry: Entry) = indexStore.songs(deviceIdOf(entry))
+
+    fun indexSongsByAlbum(entry: Entry, album: String) =
+        indexStore.songsByAlbum(deviceIdOf(entry), album)
+
+    fun indexSongsByArtist(entry: Entry, artist: String) =
+        indexStore.songsByArtist(deviceIdOf(entry), artist)
+
+    /** 批量入队（整张专辑 / 某歌手全部）；只弹一条提示，不刷屏 */
+    fun queueEnqueueAll(items: List<MediaItem>, label: String) {
+        if (items.isEmpty()) return
+        for (item in items) playbackQueue.enqueue(item)
+        syncQueueUi()
+        postMessage("已把 $label 的 ${items.size} 首加入队列（当前这首播完接着播）")
+    }
+
     /** 清掉某台服务器的目录扫描状态（= 下次 startIndexing 会重新扫） */
     fun resetServerIndex(entry: Entry) = indexStore.resetServer(deviceIdOf(entry))
 

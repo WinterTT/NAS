@@ -145,7 +145,7 @@ class MediaIndexStore(context: Context) :
     fun markContainerScanned(serverUdn: String, objectId: String, now: Long) {
         writableDatabase.execSQL(
             "UPDATE containers SET scanned=1, updated_at=? WHERE server_udn=? AND object_id=?",
-            arrayOf(now, serverUdn, objectId)
+            arrayOf<Any?>(now, serverUdn, objectId)
         )
     }
 
@@ -212,6 +212,110 @@ class MediaIndexStore(context: Context) :
             if (it.moveToFirst()) pending = it.getInt(0)
         }
         return Stats(items, servers, pending)
+    }
+
+    // ------------------------------------------------------------------
+    // 分类浏览（专辑 / 歌手 / 歌曲）
+    // ------------------------------------------------------------------
+
+    /** 专辑行 */
+    data class AlbumRow(val album: String, val artist: String, val songCount: Int)
+
+    /** 歌手行 */
+    data class ArtistRow(val artist: String, val songCount: Int, val albumCount: Int)
+
+    fun countForServer(serverUdn: String): Int {
+        readableDatabase.rawQuery(
+            "SELECT COUNT(*) FROM items WHERE server_udn=? AND res_url <> ''",
+            arrayOf(serverUdn)
+        ).use { c -> return if (c.moveToFirst()) c.getInt(0) else 0 }
+    }
+
+    /** 按专辑分组（同一专辑名可能出现不同歌手，这里取其中一个歌手做提示） */
+    fun albums(serverUdn: String): List<AlbumRow> {
+        val out = ArrayList<AlbumRow>()
+        readableDatabase.rawQuery(
+            """
+            SELECT album, MAX(artist) AS a, COUNT(*) AS c
+            FROM items
+            WHERE server_udn=? AND res_url <> '' AND album <> ''
+            GROUP BY album
+            ORDER BY album
+            """.trimIndent(),
+            arrayOf(serverUdn)
+        ).use { c ->
+            while (c.moveToNext()) {
+                out.add(AlbumRow(c.getString(0) ?: "", c.getString(1) ?: "", c.getInt(2)))
+            }
+        }
+        return out
+    }
+
+    /** 按歌手分组 */
+    fun artists(serverUdn: String): List<ArtistRow> {
+        val out = ArrayList<ArtistRow>()
+        readableDatabase.rawQuery(
+            """
+            SELECT artist, COUNT(*) AS c, COUNT(DISTINCT album) AS al
+            FROM items
+            WHERE server_udn=? AND res_url <> '' AND artist <> ''
+            GROUP BY artist
+            ORDER BY artist
+            """.trimIndent(),
+            arrayOf(serverUdn)
+        ).use { c ->
+            while (c.moveToNext()) {
+                out.add(ArtistRow(c.getString(0) ?: "", c.getInt(1), c.getInt(2)))
+            }
+        }
+        return out
+    }
+
+    /** 全部歌曲（按歌名排序） */
+    fun songs(serverUdn: String, limit: Int = 5000): List<IndexEntry> =
+        query(
+            "WHERE server_udn=? AND res_url <> '' ORDER BY title LIMIT ?",
+            arrayOf(serverUdn, limit.toString())
+        )
+
+    fun songsByAlbum(serverUdn: String, album: String): List<IndexEntry> =
+        query(
+            "WHERE server_udn=? AND res_url <> '' AND album=? ORDER BY title",
+            arrayOf(serverUdn, album)
+        )
+
+    fun songsByArtist(serverUdn: String, artist: String): List<IndexEntry> =
+        query(
+            "WHERE server_udn=? AND res_url <> '' AND artist=? ORDER BY album, title",
+            arrayOf(serverUdn, artist)
+        )
+
+    private fun query(whereClause: String, args: Array<String>): List<IndexEntry> {
+        val out = ArrayList<IndexEntry>()
+        readableDatabase.rawQuery(
+            """
+            SELECT server_udn, object_id, title, artist, album, upnp_class, res_url, mime, art_url
+            FROM items $whereClause
+            """.trimIndent(),
+            args
+        ).use { c ->
+            while (c.moveToNext()) {
+                out.add(
+                    IndexEntry(
+                        serverUdn = c.getString(0),
+                        objectId = c.getString(1),
+                        title = c.getString(2) ?: "",
+                        artist = c.getString(3) ?: "",
+                        album = c.getString(4) ?: "",
+                        upnpClass = c.getString(5) ?: "",
+                        resUrl = c.getString(6) ?: "",
+                        mime = c.getString(7) ?: "",
+                        artUrl = c.getString(8) ?: ""
+                    )
+                )
+            }
+        }
+        return out
     }
 
     fun clearAll() {
