@@ -96,6 +96,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var btnTabAlbums: Button
     private lateinit var btnTabArtists: Button
     private lateinit var btnTabSongs: Button
+    private lateinit var btnPlayAll: Button
+    private lateinit var btnQueueAll: Button
     private lateinit var serverAdapter: android.widget.BaseAdapter
 
     /** 分类列表的一行：分组（专辑/歌手）或歌曲 */
@@ -281,6 +283,8 @@ class MainActivity : AppCompatActivity() {
         btnTabAlbums = findViewById(R.id.btnTabAlbums)
         btnTabArtists = findViewById(R.id.btnTabArtists)
         btnTabSongs = findViewById(R.id.btnTabSongs)
+        btnPlayAll = findViewById(R.id.btnPlayAll)
+        btnQueueAll = findViewById(R.id.btnQueueAll)
         bottomNav = findViewById(R.id.bottomNav)
         nowPlayingBar = findViewById(R.id.nowPlayingBar)
         tvPlayEmpty = findViewById(R.id.tvPlayEmpty)
@@ -456,6 +460,22 @@ class MainActivity : AppCompatActivity() {
         btnTabAlbums.setOnClickListener { switchServerMode(0) }
         btnTabArtists.setOnClickListener { switchServerMode(1) }
         btnTabSongs.setOnClickListener { switchServerMode(2) }
+        btnPlayAll.setOnClickListener {
+            val songs = serverPlayScopeSongs()
+            if (songs.isEmpty()) {
+                Toast.makeText(this, "当前范围没有曲目", Toast.LENGTH_SHORT).show()
+            } else {
+                playAllSongs(songs, serverPlayScopeLabel())
+            }
+        }
+        btnQueueAll.setOnClickListener {
+            val songs = serverPlayScopeSongs()
+            if (songs.isEmpty()) {
+                Toast.makeText(this, "当前范围没有曲目", Toast.LENGTH_SHORT).show()
+            } else {
+                vm.queueEnqueueAll(songs.map { it.toMediaItem() }, serverPlayScopeLabel())
+            }
+        }
         // 迷你条（非按钮区域）点击 -> 打开播放页
         miniNowBar.setOnClickListener { switchTab(R.id.nav_playing) }
 
@@ -1480,9 +1500,48 @@ class MainActivity : AppCompatActivity() {
             serverMode == 1 && filter == null -> "索引里没有歌手信息\n（有些文件没写歌手标签，可以看「歌曲」页）"
             else -> "这个分类下没有内容"
         }
+
+        // "全部播放 / 全部入队"作用范围 = 当前所见范围（某专辑 / 某歌手 / 全库）
+        val scopeCount = serverPlayScopeSongs().size
+        btnPlayAll.text = "▶ 全部播放（$scopeCount）"
+        btnQueueAll.text = "＋ 全部入队（$scopeCount）"
+        btnPlayAll.isEnabled = scopeCount > 0
+        btnQueueAll.isEnabled = scopeCount > 0
     }
 
-    /** 专辑/歌手分组长按：整批加入队列 / 播放第一首 */
+    /**
+     * 当前"全部播放/全部入队"的作用范围：
+     *   - 进了某专辑 / 某歌手 → 那一批
+     *   - 专辑/歌手总览、歌曲页 → 全库
+     */
+    private fun serverPlayScopeSongs(): List<MediaIndexStore.IndexEntry> {
+        val entry = serverEntry ?: return emptyList()
+        val filter = serverFilter
+        return when {
+            serverMode == 0 && filter != null -> vm.indexSongsByAlbum(entry, filter)
+            serverMode == 1 && filter != null -> vm.indexSongsByArtist(entry, filter)
+            else -> vm.indexSongs(entry)
+        }
+    }
+
+    private fun serverPlayScopeLabel(): String {
+        val filter = serverFilter
+        return when {
+            serverMode == 0 && filter != null -> "《${filter}》"
+            serverMode == 1 && filter != null -> filter
+            else -> "全部歌曲"
+        }
+    }
+
+    /** 全部播放：第一首推给设备，其余进入待播列表按顺序自动连播 */
+    private fun playAllSongs(songs: List<MediaIndexStore.IndexEntry>, label: String) {
+        val items = songs.map { it.toMediaItem() }
+        if (items.isEmpty()) return
+        vm.replaceQueueWith(items.drop(1), label, items.size)
+        playMediaItemFromServer(items.first())
+    }
+
+    /** 专辑/歌手分组长按：全部播放 / 全部加入队列 / 播放第一首 */
     private fun showGroupMenu(groupTitle: String) {
         val entry = serverEntry ?: return
         val songs = if (serverMode == 0) vm.indexSongsByAlbum(entry, groupTitle)
@@ -1494,10 +1553,11 @@ class MainActivity : AppCompatActivity() {
         val label = if (serverMode == 0) "《$groupTitle》" else groupTitle
         AlertDialog.Builder(this)
             .setTitle("$label（${songs.size} 首）")
-            .setItems(arrayOf("全部加入队列", "播放第一首")) { _, which ->
+            .setItems(arrayOf("▶ 全部播放（从这里开始）", "＋ 全部加入队列", "只播放第一首")) { _, which ->
                 when (which) {
-                    0 -> vm.queueEnqueueAll(songs.map { it.toMediaItem() }, label)
-                    1 -> playMediaItemFromServer(songs.first().toMediaItem())
+                    0 -> playAllSongs(songs, label)
+                    1 -> vm.queueEnqueueAll(songs.map { it.toMediaItem() }, label)
+                    2 -> playMediaItemFromServer(songs.first().toMediaItem())
                 }
             }
             .setNegativeButton("取消", null)

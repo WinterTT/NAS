@@ -189,6 +189,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         postMessage("已把 $label 的 ${items.size} 首加入队列（当前这首播完接着播）")
     }
 
+    /**
+     * "全部播放"：把待播列表**替换**成这一批（不含马上要推的第一首）。
+     * 调用方随后把第一首推给设备，其余靠现有连播机制按顺序播下去。
+     */
+    fun replaceQueueWith(items: List<MediaItem>, label: String, totalCount: Int) {
+        playbackQueue.clear()
+        for (item in items) playbackQueue.enqueue(item)
+        syncQueueUi()
+        postMessage("播放列表已设为 $label：共 $totalCount 首，第 1 首推送后自动往下播")
+    }
+
     /** 清掉某台服务器的目录扫描状态（= 下次 startIndexing 会重新扫） */
     fun resetServerIndex(entry: Entry) = indexStore.resetServer(serverIndexKeyOf(entry))
 
