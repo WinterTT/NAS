@@ -111,6 +111,14 @@ class MainActivity : AppCompatActivity() {
     private var serverEntry: Entry? = null
     private var serverCds: UpnpService? = null
 
+    /** 0=顶层分类（音乐/视频/图片…） 1=分类内（专辑/歌手/歌曲） 2=某专辑/某歌手详情 */
+    private var serverStage = 0
+
+    /** 当前分类（null = 全部分类/全部媒体） */
+    private var serverCategoryId: String? = null
+    private var serverCategoryTitle = "全部媒体"
+    private val categoryTargets = ArrayList<MediaIndexStore.CategoryRow?>()
+
     /** 0=专辑 1=歌手 2=歌曲 */
     private var serverMode = 0
 
@@ -428,9 +436,22 @@ class MainActivity : AppCompatActivity() {
         }
         listServer.adapter = serverAdapter
         listServer.setOnItemClickListener { _, _, p, _ ->
+            // 第 0 层：点分类进入（音乐 / 视频 / 图片 / 全部）
+            if (serverStage == 0) {
+                val target = categoryTargets.getOrNull(p) ?: return@setOnItemClickListener
+                serverCategoryId = target?.topId
+                serverCategoryTitle = target?.title ?: "全部媒体"
+                serverStage = 1
+                serverMode = 0
+                serverFilter = null
+                updateServerTabs()
+                refreshServerRows()
+                return@setOnItemClickListener
+            }
             when (val row = serverRows.getOrNull(p)) {
                 is ServerRow.Group -> {
                     serverFilter = row.title
+                    serverStage = 2
                     refreshServerRows()
                 }
                 is ServerRow.Song -> playMediaItemFromServer(row.item)
@@ -451,11 +472,22 @@ class MainActivity : AppCompatActivity() {
             }
         }
         btnServerBack.setOnClickListener {
-            if (serverFilter != null) {
-                serverFilter = null
-                refreshServerRows()
-            } else {
-                closeServerPage()
+            when {
+                serverStage == 2 -> { // 详情 → 回到分类内列表
+                    serverFilter = null
+                    serverStage = 1
+                    refreshServerRows()
+                }
+                serverStage == 1 -> { // 分类内 → 回到顶层分类
+                    serverCategoryId = null
+                    serverCategoryTitle = "全部媒体"
+                    serverMode = 0
+                    serverFilter = null
+                    serverStage = 0
+                    updateServerTabs()
+                    refreshServerRows()
+                }
+                else -> closeServerPage()
             }
         }
         btnServerBrowse.setOnClickListener { serverCds?.let { showMediaBrowser(it) } }
@@ -1420,6 +1452,9 @@ class MainActivity : AppCompatActivity() {
     private fun openServerPage(entry: Entry, cds: UpnpService) {
         serverEntry = entry
         serverCds = cds
+        serverStage = 0          // 先进"顶层分类"页
+        serverCategoryId = null
+        serverCategoryTitle = "全部媒体"
         serverMode = 0
         serverFilter = null
         pageServer.visibility = View.VISIBLE
@@ -1451,8 +1486,14 @@ class MainActivity : AppCompatActivity() {
         refreshServerRows()
     }
 
-    /** 分类切换按钮的选中态样式 */
+    /** 分类切换按钮的选中态样式（分类层不显示 Tab） */
     private fun updateServerTabs() {
+        val showTabs = serverStage >= 1
+        val tabVisibility = if (showTabs) View.VISIBLE else View.GONE
+        btnTabAlbums.visibility = tabVisibility
+        btnTabArtists.visibility = tabVisibility
+        btnTabSongs.visibility = tabVisibility
+
         fun style(btn: Button, active: Boolean) {
             btn.setBackgroundResource(if (active) R.drawable.bg_pill_primary else R.drawable.bg_pill_ghost)
             btn.setTextColor(
@@ -1467,16 +1508,44 @@ class MainActivity : AppCompatActivity() {
         style(btnTabSongs, serverMode == 2)
     }
 
-    /** 按当前模式/层级刷新列表 */
+    /** 按当前层级/模式刷新列表 */
     private fun refreshServerRows() {
         val entry = serverEntry ?: return
         serverRows.clear()
+
+        // ---- 第 0 层：顶层分类（音乐 / 视频 / 图片…）----
+        if (serverStage == 0) {
+            categoryTargets.clear()
+            val cats = vm.indexCategories(entry)
+            val total = cats.sumOf { it.itemCount }
+            serverRows.add(ServerRow.Group("全部媒体", "$total 项 · 跨分类浏览"))
+            categoryTargets.add(null)
+            for (c in cats) {
+                serverRows.add(ServerRow.Group(c.title, "${c.itemCount} 项 · ${c.kind}"))
+                categoryTargets.add(c)
+            }
+            tvServerStatus.text =
+                "共 ${cats.size} 个分类 · ${total} 项\n点一个分类进入（音乐/视频/图片由服务器目录决定）"
+            serverAdapter.notifyDataSetChanged()
+            tvServerEmpty.visibility = if (serverRows.isEmpty()) View.VISIBLE else View.GONE
+            tvServerEmpty.text = "索引里没有分类信息\n可以点右上「文件夹」直接浏览，或重新建立索引"
+
+            val scopeCount = serverPlayScopeSongs().size
+            btnPlayAll.text = "▶ 全部播放（$scopeCount）"
+            btnQueueAll.text = "＋ 全部入队（$scopeCount）"
+            btnPlayAll.isEnabled = scopeCount > 0
+            btnQueueAll.isEnabled = scopeCount > 0
+            return
+        }
+
+        val topId = serverCategoryId
         val filter = serverFilter
+        val prefix = "分类：$serverCategoryTitle · "
 
         when (serverMode) {
             0 -> { // 专辑
                 if (filter == null) {
-                    val albums = vm.indexAlbums(entry)
+                    val albums = vm.indexAlbums(entry, topId)
                     albums.forEach { a ->
                         serverRows.add(
                             ServerRow.Group(
@@ -1487,9 +1556,10 @@ class MainActivity : AppCompatActivity() {
                             )
                         )
                     }
-                    tvServerStatus.text = "专辑 ${albums.size} 张 · 共 ${albums.sumOf { it.songCount }} 首"
+                    tvServerStatus.text =
+                        prefix + "专辑 ${albums.size} 张 · 共 ${albums.sumOf { it.songCount }} 首"
                 } else {
-                    val songs = vm.indexSongsByAlbum(entry, filter)
+                    val songs = vm.indexSongsByAlbum(entry, filter, topId)
                     songs.forEach { serverRows.add(ServerRow.Song(it.toMediaItem())) }
                     tvServerStatus.text = "《$filter》 ${songs.size} 首"
                 }
@@ -1497,7 +1567,7 @@ class MainActivity : AppCompatActivity() {
 
             1 -> { // 歌手
                 if (filter == null) {
-                    val artists = vm.indexArtists(entry)
+                    val artists = vm.indexArtists(entry, topId)
                     artists.forEach { a ->
                         serverRows.add(
                             ServerRow.Group(
@@ -1507,30 +1577,30 @@ class MainActivity : AppCompatActivity() {
                         )
                     }
                     tvServerStatus.text =
-                        "歌手 ${artists.size} 位 · 共 ${artists.sumOf { it.songCount }} 首"
+                        prefix + "歌手 ${artists.size} 位 · 共 ${artists.sumOf { it.songCount }} 首"
                 } else {
-                    val songs = vm.indexSongsByArtist(entry, filter)
+                    val songs = vm.indexSongsByArtist(entry, filter, topId)
                     songs.forEach { serverRows.add(ServerRow.Song(it.toMediaItem())) }
                     tvServerStatus.text = "$filter ${songs.size} 首"
                 }
             }
 
             else -> { // 歌曲
-                val songs = vm.indexSongs(entry)
+                val songs = vm.indexSongs(entry, topId)
                 songs.forEach { serverRows.add(ServerRow.Song(it.toMediaItem())) }
-                tvServerStatus.text = "全部歌曲 ${songs.size} 首（点一首即可推送播放）"
+                tvServerStatus.text = prefix + "曲目 ${songs.size} 项（点一项即可推送播放）"
             }
         }
 
         serverAdapter.notifyDataSetChanged()
         tvServerEmpty.visibility = if (serverRows.isEmpty()) View.VISIBLE else View.GONE
         tvServerEmpty.text = when {
-            serverMode == 0 && filter == null -> "索引里没有专辑信息\n（有些文件没写专辑标签，可以看「歌曲」页）"
-            serverMode == 1 && filter == null -> "索引里没有歌手信息\n（有些文件没写歌手标签，可以看「歌曲」页）"
+            serverMode == 0 && filter == null -> "这个分类里没有专辑信息\n（有些文件没写专辑标签，可以看「歌曲」页）"
+            serverMode == 1 && filter == null -> "这个分类里没有歌手信息\n（有些文件没写歌手标签，可以看「歌曲」页）"
             else -> "这个分类下没有内容"
         }
 
-        // "全部播放 / 全部入队"作用范围 = 当前所见范围（某专辑 / 某歌手 / 全库）
+        // "全部播放 / 全部入队"作用范围 = 当前所见范围（某专辑 / 某歌手 / 当前分类全部）
         val scopeCount = serverPlayScopeSongs().size
         btnPlayAll.text = "▶ 全部播放（$scopeCount）"
         btnQueueAll.text = "＋ 全部入队（$scopeCount）"
@@ -1540,16 +1610,17 @@ class MainActivity : AppCompatActivity() {
 
     /**
      * 当前"全部播放/全部入队"的作用范围：
+     *   - 第 0 层 / 分类内总览 / 歌曲页 → 当前分类（或全部）的所有曲目
      *   - 进了某专辑 / 某歌手 → 那一批
-     *   - 专辑/歌手总览、歌曲页 → 全库
      */
     private fun serverPlayScopeSongs(): List<MediaIndexStore.IndexEntry> {
         val entry = serverEntry ?: return emptyList()
         val filter = serverFilter
+        val topId = serverCategoryId
         return when {
-            serverMode == 0 && filter != null -> vm.indexSongsByAlbum(entry, filter)
-            serverMode == 1 && filter != null -> vm.indexSongsByArtist(entry, filter)
-            else -> vm.indexSongs(entry)
+            serverMode == 0 && filter != null -> vm.indexSongsByAlbum(entry, filter, topId)
+            serverMode == 1 && filter != null -> vm.indexSongsByArtist(entry, filter, topId)
+            else -> vm.indexSongs(entry, topId)
         }
     }
 
@@ -1558,7 +1629,7 @@ class MainActivity : AppCompatActivity() {
         return when {
             serverMode == 0 && filter != null -> "《${filter}》"
             serverMode == 1 && filter != null -> filter
-            else -> "全部歌曲"
+            else -> serverCategoryTitle
         }
     }
 
@@ -1570,11 +1641,12 @@ class MainActivity : AppCompatActivity() {
         playMediaItemFromServer(items.first())
     }
 
-    /** 专辑/歌手分组长按：全部播放 / 全部加入队列 / 播放第一首 */
+    /** 专辑/歌手分组长按：全部播放 / 全部加入队列 / 只播放第一首 */
     private fun showGroupMenu(groupTitle: String) {
         val entry = serverEntry ?: return
-        val songs = if (serverMode == 0) vm.indexSongsByAlbum(entry, groupTitle)
-        else vm.indexSongsByArtist(entry, groupTitle)
+        val topId = serverCategoryId
+        val songs = if (serverMode == 0) vm.indexSongsByAlbum(entry, groupTitle, topId)
+        else vm.indexSongsByArtist(entry, groupTitle, topId)
         if (songs.isEmpty()) {
             Toast.makeText(this, "这个分组下没有曲目", Toast.LENGTH_SHORT).show()
             return

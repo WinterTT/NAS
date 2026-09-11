@@ -59,8 +59,8 @@ class LibraryIndexer(
 
     private fun walk(serverUdn: String, cds: UpnpService) {
         val now = System.currentTimeMillis()
-        // 根目录入队（若已扫过会因 CONFLICT_IGNORE 保留状态 → 支持续扫）
-        store.putContainer(serverUdn, ROOT_ID, null, "根目录", now)
+        // 根目录先入队（它代表"全部"）；已扫过的会因 CONFLICT_IGNORE 保留状态 → 支持续扫
+        store.putContainer(serverUdn, ROOT_ID, null, "根目录", ROOT_ID, "全部", now)
 
         var scanned = 0
         var items = store.stats().itemCount
@@ -74,7 +74,12 @@ class LibraryIndexer(
                     listener.onFinished(serverUdn, items, "done")
                     return
                 }
-                val (objectId, title) = next
+                val objectId = next.objectId
+                val title = next.title
+                // 该目录所属的顶层分类（第一层目录 = 分类本身；续扫时由表里带出来）
+                val topId = next.topId.ifEmpty { objectId }
+                val topTitle = next.topTitle.ifEmpty { title }
+
                 val out = ContentDirectoryClient.browse(cds, objectId)
                 if (!out.ok) {
                     // 单个目录失败不中断整体：标记跳过，继续扫别的
@@ -84,14 +89,21 @@ class LibraryIndexer(
                 }
                 for (obj in out.objects) {
                     when (obj) {
-                        is MediaContainer -> store.putContainer(
-                            serverUdn, obj.id, objectId, obj.title, System.currentTimeMillis()
-                        )
+                        is MediaContainer -> {
+                            // 根目录的直接子目录 = 顶层分类（音乐 / 视频 / 图片…）
+                            val childTopId = if (objectId == ROOT_ID) obj.id else topId
+                            val childTopTitle = if (objectId == ROOT_ID) obj.title else topTitle
+                            store.putContainer(
+                                serverUdn, obj.id, objectId, obj.title,
+                                childTopId, childTopTitle, System.currentTimeMillis()
+                            )
+                        }
                         is MediaItem -> {
                             if (obj.resUrl.isNotBlank()) {
                                 // 命中任一去重键（同文件多 URL / 同标签）时返回 false
                                 val inserted = store.putItem(
-                                    serverUdn, objectId, obj, System.currentTimeMillis()
+                                    serverUdn, objectId, topId, topTitle, obj,
+                                    System.currentTimeMillis()
                                 )
                                 if (inserted) items++ else skipped++
                             }

@@ -36,7 +36,10 @@ class MediaIndexStore(context: Context) :
         /** 归一化 URL 去重键 */
         val dedupeKey: String = "",
         /** 标题+歌手+专辑 去重键 */
-        val trackKey: String = ""
+        val trackKey: String = "",
+        /** 第 10 课：所属顶层分类（音乐 / 视频 / 图片…） */
+        val topId: String = "",
+        val topTitle: String = ""
     ) {
         fun toMediaItem(): MediaItem = MediaItem(
             id = objectId,
@@ -64,6 +67,8 @@ class MediaIndexStore(context: Context) :
               server_udn TEXT NOT NULL,
               object_id  TEXT NOT NULL,
               parent_id  TEXT,
+              top_id     TEXT,
+              top_title  TEXT,
               title      TEXT,
               artist     TEXT,
               album      TEXT,
@@ -82,6 +87,7 @@ class MediaIndexStore(context: Context) :
             """.trimIndent()
         )
         db.execSQL("CREATE INDEX idx_items_title ON items(title)")
+        db.execSQL("CREATE INDEX idx_items_top ON items(server_udn, top_id)")
         // 三重去重键（空键不参与唯一约束，避免把"没标签的条目"全判成同一个）：
         //   dedupe_key 归一化 URL（去 query/fragment、小写）
         //   file_key   文件大小+时长（同一文件必然一致，跟 URL/标签无关）← 最硬的判据
@@ -96,6 +102,8 @@ class MediaIndexStore(context: Context) :
               object_id  TEXT NOT NULL,
               parent_id  TEXT,
               title      TEXT,
+              top_id     TEXT,
+              top_title  TEXT,
               scanned    INTEGER NOT NULL DEFAULT 0,
               updated_at INTEGER,
               PRIMARY KEY(server_udn, object_id)
@@ -105,9 +113,9 @@ class MediaIndexStore(context: Context) :
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        // v3：去重判据升级（新增文件大小/时长等键）。旧索引缺这些字段，
-        // 直接重建表结构 —— 索引是"可再生数据"，用户重新建一次索引即可。
-        if (oldVersion < 3) {
+        // v4：新增"顶层分类"字段（音乐/视频/图片…）。旧索引没有这些信息，
+        // 直接重建表结构 —— 索引可再生，用户重新建一次索引即可。
+        if (oldVersion < 4) {
             db.execSQL("DROP TABLE IF EXISTS items")
             db.execSQL("DROP TABLE IF EXISTS containers")
             onCreate(db)
@@ -122,11 +130,29 @@ class MediaIndexStore(context: Context) :
      * 写入一条曲目。命中任一去重键（URL 归一化 / 文件大小+时长 / 标题+歌手+专辑）
      * 时会被忽略，返回 false —— 这就是"同一首歌多视图多 URL"不再重复入库的关键。
      */
-    fun putItem(serverUdn: String, parentId: String, item: MediaItem, now: Long): Boolean {
+    /** 顶层分类行（音乐 / 视频 / 图片…） */
+    data class CategoryRow(
+        val topId: String,
+        val title: String,
+        val itemCount: Int,
+        /** 该分类下占多数的媒体类型：音乐 / 视频 / 图片 / 其他 */
+        val kind: String
+    )
+
+    fun putItem(
+        serverUdn: String,
+        parentId: String,
+        topId: String,
+        topTitle: String,
+        item: MediaItem,
+        now: Long
+    ): Boolean {
         val values = ContentValues().apply {
             put("server_udn", serverUdn)
             put("object_id", item.id)
             put("parent_id", parentId)
+            put("top_id", topId)
+            put("top_title", topTitle)
             put("title", item.title)
             put("artist", item.artist)
             put("album", item.album)
@@ -173,12 +199,30 @@ class MediaIndexStore(context: Context) :
         return "$t|$a|$al"
     }
 
-    fun putContainer(serverUdn: String, objectId: String, parentId: String?, title: String, now: Long) {
+    /** 目录扫描项（含所属顶层分类，续扫时也能知道分类） */
+    data class ContainerRow(
+        val objectId: String,
+        val title: String,
+        val topId: String,
+        val topTitle: String
+    )
+
+    fun putContainer(
+        serverUdn: String,
+        objectId: String,
+        parentId: String?,
+        title: String,
+        topId: String,
+        topTitle: String,
+        now: Long
+    ) {
         val values = ContentValues().apply {
             put("server_udn", serverUdn)
             put("object_id", objectId)
             put("parent_id", parentId)
             put("title", title)
+            put("top_id", topId)
+            put("top_title", topTitle)
             put("scanned", 0)
             put("updated_at", now)
         }
@@ -189,15 +233,20 @@ class MediaIndexStore(context: Context) :
     }
 
     /** 取一个还没扫的目录（断点续扫）；没有则返回 null */
-    fun nextUnscannedContainer(serverUdn: String): Pair<String, String>? {
+    fun nextUnscannedContainer(serverUdn: String): ContainerRow? {
         readableDatabase.rawQuery(
-            "SELECT object_id, title FROM containers WHERE server_udn=? AND scanned=0 LIMIT 1",
+            """
+            SELECT object_id, title, top_id, top_title
+            FROM containers WHERE server_udn=? AND scanned=0 LIMIT 1
+            """.trimIndent(),
             arrayOf(serverUdn)
         ).use { c ->
             if (!c.moveToFirst()) return null
             val objectId: String = c.getString(0)
             val title: String = c.getString(1) ?: ""
-            return Pair(objectId, title)
+            val topId: String = c.getString(2) ?: objectId
+            val topTitle: String = c.getString(3) ?: title
+            return ContainerRow(objectId, title, topId, topTitle)
         }
     }
 
@@ -293,18 +342,62 @@ class MediaIndexStore(context: Context) :
         ).use { c -> return if (c.moveToFirst()) c.getInt(0) else 0 }
     }
 
+    /** 顶层分类（音乐 / 视频 / 图片…）：按条数排序，附带"主要媒体类型" */
+    fun categories(serverUdn: String): List<CategoryRow> {
+        val out = ArrayList<CategoryRow>()
+        readableDatabase.rawQuery(
+            """
+            SELECT top_id, top_title,
+                   COUNT(*) AS c,
+                   SUM(CASE WHEN upnp_class LIKE '%audio%' OR mime LIKE 'audio%' THEN 1 ELSE 0 END) AS aud,
+                   SUM(CASE WHEN upnp_class LIKE '%video%' OR mime LIKE 'video%' THEN 1 ELSE 0 END) AS vid,
+                   SUM(CASE WHEN upnp_class LIKE '%image%' OR mime LIKE 'image%' THEN 1 ELSE 0 END) AS img
+            FROM items
+            WHERE server_udn=? AND res_url <> ''
+            GROUP BY top_id
+            ORDER BY c DESC
+            """.trimIndent(),
+            arrayOf(serverUdn)
+        ).use { c ->
+            while (c.moveToNext()) {
+                val count = c.getInt(2)
+                val aud = c.getInt(3)
+                val vid = c.getInt(4)
+                val img = c.getInt(5)
+                val kind = when {
+                    aud >= vid && aud >= img && aud > 0 -> "音乐"
+                    vid >= aud && vid >= img && vid > 0 -> "视频"
+                    img >= aud && img >= vid && img > 0 -> "图片"
+                    else -> "其他"
+                }
+                out.add(
+                    CategoryRow(
+                        topId = c.getString(0) ?: "",
+                        title = c.getString(1) ?: "未分类",
+                        itemCount = count,
+                        kind = kind
+                    )
+                )
+            }
+        }
+        return out
+    }
+
     /** 按专辑分组（同一专辑名可能出现不同歌手，这里取其中一个歌手做提示） */
-    fun albums(serverUdn: String): List<AlbumRow> {
+    fun albums(serverUdn: String, topId: String? = null): List<AlbumRow> {
         val out = ArrayList<AlbumRow>()
+        val top = topId.orEmpty()
+        val topClause = if (top.isEmpty()) "" else " AND top_id = ?"
+        val args = if (top.isEmpty()) arrayOf(serverUdn) else arrayOf(serverUdn, top)
         readableDatabase.rawQuery(
             """
             SELECT album, MAX(artist) AS a, COUNT(*) AS c
             FROM items
-            WHERE server_udn=? AND res_url <> '' AND album <> ''
+            WHERE server_udn=? AND res_url <> '' AND album <> ''$topClause
             GROUP BY album
             ORDER BY album
             """.trimIndent(),
-            arrayOf(serverUdn)
+            args
         ).use { c ->
             while (c.moveToNext()) {
                 out.add(AlbumRow(c.getString(0) ?: "", c.getString(1) ?: "", c.getInt(2)))
@@ -314,17 +407,20 @@ class MediaIndexStore(context: Context) :
     }
 
     /** 按歌手分组 */
-    fun artists(serverUdn: String): List<ArtistRow> {
+    fun artists(serverUdn: String, topId: String? = null): List<ArtistRow> {
         val out = ArrayList<ArtistRow>()
+        val top = topId.orEmpty()
+        val topClause = if (top.isEmpty()) "" else " AND top_id = ?"
+        val args = if (top.isEmpty()) arrayOf(serverUdn) else arrayOf(serverUdn, top)
         readableDatabase.rawQuery(
             """
             SELECT artist, COUNT(*) AS c, COUNT(DISTINCT album) AS al
             FROM items
-            WHERE server_udn=? AND res_url <> '' AND artist <> ''
+            WHERE server_udn=? AND res_url <> '' AND artist <> ''$topClause
             GROUP BY artist
             ORDER BY artist
             """.trimIndent(),
-            arrayOf(serverUdn)
+            args
         ).use { c ->
             while (c.moveToNext()) {
                 out.add(ArtistRow(c.getString(0) ?: "", c.getInt(1), c.getInt(2)))
@@ -333,31 +429,46 @@ class MediaIndexStore(context: Context) :
         return out
     }
 
-    /** 全部歌曲（按歌名排序） */
-    fun songs(serverUdn: String, limit: Int = 5000): List<IndexEntry> =
-        query(
-            "WHERE server_udn=? AND res_url <> '' ORDER BY title LIMIT ?",
-            arrayOf(serverUdn, limit.toString())
+    /** 全部曲目（按标题排序），可按顶层分类过滤 */
+    fun songs(serverUdn: String, topId: String? = null, limit: Int = 5000): List<IndexEntry> {
+        val top = topId.orEmpty()
+        val topClause = if (top.isEmpty()) "" else " AND top_id = ?"
+        val args = if (top.isEmpty()) arrayOf(serverUdn, limit.toString())
+        else arrayOf(serverUdn, top, limit.toString())
+        return query(
+            "WHERE server_udn=? AND res_url <> ''$topClause ORDER BY title LIMIT ?",
+            args
         )
+    }
 
-    fun songsByAlbum(serverUdn: String, album: String): List<IndexEntry> =
-        query(
-            "WHERE server_udn=? AND res_url <> '' AND album=? ORDER BY title",
-            arrayOf(serverUdn, album)
+    fun songsByAlbum(serverUdn: String, album: String, topId: String? = null): List<IndexEntry> {
+        val top = topId.orEmpty()
+        val topClause = if (top.isEmpty()) "" else " AND top_id = ?"
+        val args = if (top.isEmpty()) arrayOf(serverUdn, album)
+        else arrayOf(serverUdn, album, top)
+        return query(
+            "WHERE server_udn=? AND res_url <> '' AND album=?$topClause ORDER BY title",
+            args
         )
+    }
 
-    fun songsByArtist(serverUdn: String, artist: String): List<IndexEntry> =
-        query(
-            "WHERE server_udn=? AND res_url <> '' AND artist=? ORDER BY album, title",
-            arrayOf(serverUdn, artist)
+    fun songsByArtist(serverUdn: String, artist: String, topId: String? = null): List<IndexEntry> {
+        val top = topId.orEmpty()
+        val topClause = if (top.isEmpty()) "" else " AND top_id = ?"
+        val args = if (top.isEmpty()) arrayOf(serverUdn, artist)
+        else arrayOf(serverUdn, artist, top)
+        return query(
+            "WHERE server_udn=? AND res_url <> '' AND artist=?$topClause ORDER BY album, title",
+            args
         )
+    }
 
     private fun query(whereClause: String, args: Array<String>): List<IndexEntry> {
         val out = ArrayList<IndexEntry>()
         readableDatabase.rawQuery(
             """
             SELECT server_udn, object_id, title, artist, album, upnp_class, res_url, mime, art_url,
-                   dedupe_key, track_key
+                   dedupe_key, track_key, top_id, top_title
             FROM items $whereClause
             """.trimIndent(),
             args
@@ -375,7 +486,9 @@ class MediaIndexStore(context: Context) :
                         mime = c.getString(7) ?: "",
                         artUrl = c.getString(8) ?: "",
                         dedupeKey = c.getString(9) ?: "",
-                        trackKey = c.getString(10) ?: ""
+                        trackKey = c.getString(10) ?: "",
+                        topId = c.getString(11) ?: "",
+                        topTitle = c.getString(12) ?: ""
                     )
                 )
             }

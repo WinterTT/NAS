@@ -176,17 +176,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     /** 这台服务器索引里有多少首（>0 表示"已建索引"） */
     fun indexSongCount(entry: Entry): Int = indexStore.countForServer(serverIndexKeyOf(entry))
 
-    fun indexAlbums(entry: Entry) = indexStore.albums(serverIndexKeyOf(entry))
+    fun indexCategories(entry: Entry) = indexStore.categories(serverIndexKeyOf(entry))
 
-    fun indexArtists(entry: Entry) = indexStore.artists(serverIndexKeyOf(entry))
+    fun indexAlbums(entry: Entry, topId: String? = null) =
+        indexStore.albums(serverIndexKeyOf(entry), topId)
 
-    fun indexSongs(entry: Entry) = indexStore.songs(serverIndexKeyOf(entry))
+    fun indexArtists(entry: Entry, topId: String? = null) =
+        indexStore.artists(serverIndexKeyOf(entry), topId)
 
-    fun indexSongsByAlbum(entry: Entry, album: String) =
-        indexStore.songsByAlbum(serverIndexKeyOf(entry), album)
+    fun indexSongs(entry: Entry, topId: String? = null) =
+        indexStore.songs(serverIndexKeyOf(entry), topId)
 
-    fun indexSongsByArtist(entry: Entry, artist: String) =
-        indexStore.songsByArtist(serverIndexKeyOf(entry), artist)
+    fun indexSongsByAlbum(entry: Entry, album: String, topId: String? = null) =
+        indexStore.songsByAlbum(serverIndexKeyOf(entry), album, topId)
+
+    fun indexSongsByArtist(entry: Entry, artist: String, topId: String? = null) =
+        indexStore.songsByArtist(serverIndexKeyOf(entry), artist, topId)
 
     /** 批量入队（整张专辑 / 某歌手全部）；只弹一条提示，不刷屏 */
     fun queueEnqueueAll(items: List<MediaItem>, label: String) {
