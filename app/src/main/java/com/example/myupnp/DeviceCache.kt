@@ -18,7 +18,11 @@ class DeviceCache(context: Context) {
 
     private val prefs = context.getSharedPreferences("device_cache", Context.MODE_PRIVATE)
 
-    fun save(entries: List<Entry>) {
+    /**
+     * 保存快照。
+     * @param net 当前网络键 —— 设备属于某个局域网，换网络后旧快照不能再拿来用
+     */
+    fun save(entries: List<Entry>, net: String?) {
         val arr = JSONArray()
         for (e in entries) {
             val device = e.device ?: continue // 描述没拉到的先不缓存
@@ -31,10 +35,13 @@ class DeviceCache(context: Context) {
                 }
             )
         }
-        prefs.edit().putString(KEY, arr.toString()).apply()
+        prefs.edit().putString(KEY, arr.toString()).putString(KEY_NET, net ?: "").apply()
     }
 
-    fun load(): List<Entry> {
+    /** 读取快照：只返回与 [net] 同一网络的快照，否则视为无效（不串网） */
+    fun load(net: String?): List<Entry> {
+        val storedNet = prefs.getString(KEY_NET, "") ?: ""
+        if (storedNet != (net ?: "")) return emptyList()
         val raw = prefs.getString(KEY, "[]") ?: "[]"
         val out = ArrayList<Entry>()
         runCatching {
@@ -59,7 +66,7 @@ class DeviceCache(context: Context) {
         return out
     }
 
-    fun clear() = prefs.edit().remove(KEY).apply()
+    fun clear() = prefs.edit().remove(KEY).remove(KEY_NET).apply()
 
     private fun deviceToJson(d: UpnpDevice): JSONObject = JSONObject().apply {
         put("type", d.deviceType)
@@ -115,5 +122,6 @@ class DeviceCache(context: Context) {
 
     private companion object {
         const val KEY = "snapshot"
+        const val KEY_NET = "net"
     }
 }

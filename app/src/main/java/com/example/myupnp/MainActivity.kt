@@ -84,6 +84,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var searchAdapter: android.widget.BaseAdapter
     private val searchItems = ArrayList<MediaItem>()
     private var indexDialog: AlertDialog? = null
+    private lateinit var tvSettingsInfo: TextView
 
     // ===== 服务器曲库（索引后的分类浏览） =====
     private lateinit var pageServer: View
@@ -243,6 +244,7 @@ class MainActivity : AppCompatActivity() {
         btnPushLocal = findViewById(R.id.btnPushLocal)
         btnQueueQuick = findViewById(R.id.btnQueueQuick)
         btnRecentQuick = findViewById(R.id.btnRecentQuick)
+        tvSettingsInfo = findViewById(R.id.tvSettingsInfo)
         btnStart = findViewById(R.id.btnStart)
         btnStop = findViewById(R.id.btnStop)
 
@@ -709,6 +711,7 @@ class MainActivity : AppCompatActivity() {
         // 回到前台：之前是"扫描中"就自动续扫，设备列表/分类页数据不必重新点一遍
         vm.resumeAfterReturn()
         refreshLibraryRows()
+        updateSettingsInfo()
         if (::searchAdapter.isInitialized && pageSearch.visibility == View.VISIBLE) {
             updateSearchStatus()
             runLocalSearch(etSearch.text.toString())
@@ -1384,6 +1387,18 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    /** 设置页：显示当前网络与数据作用域说明 */
+    private fun updateSettingsInfo() {
+        val net = NetworkScope.current()
+        val text = buildString {
+            append("当前网络：").append(NetworkScope.labelOf(net)).append('\n')
+            append("· 设备列表 / 待播队列 / 最近播放：按网络分别保存（换网络各自独立）\n")
+            append("· 收藏与别名：跟着设备走（同一台设备换网络也保留）\n")
+            append("· 曲库索引：按服务器保存，搜索只显示当前在线服务器的结果")
+        }
+        if (tvSettingsInfo.text.toString() != text) tvSettingsInfo.text = text
+    }
+
     /** 音量滑杆松手：把音量设到目标值（乐观更新 + 后台 SetVolume） */
     private fun sendVolume(target: Int) {
         val np = nowSession.current ?: return
@@ -1617,12 +1632,18 @@ class MainActivity : AppCompatActivity() {
             return
         }
         val hits = vm.searchIndex(kw)
-        searchItems.addAll(hits.map { it.toMediaItem() })
+        // 第 9 课：只显示"当前网络在线服务器"的条目，避免搜索出换网络后播不了的歌
+        val present = vm.presentServerKeys()
+        val usable = hits.filter { present.isEmpty() || it.serverUdn in present }
+        val hidden = hits.size - usable.size
+        searchItems.addAll(usable.map { it.toMediaItem() })
         searchAdapter.notifyDataSetChanged()
         tvSearchEmpty.visibility = if (searchItems.isEmpty()) View.VISIBLE else View.GONE
         tvSearchEmpty.text = "本地索引里没有匹配「$kw」\n可以点下方「在服务器上搜（实验）」"
-        tvSearchStatus.text =
-            "本地索引命中 ${searchItems.size} 条（索引共 ${vm.indexStats().itemCount} 首）"
+        tvSearchStatus.text = buildString {
+            append("本地索引命中 ${searchItems.size} 条（索引共 ${vm.indexStats().itemCount} 首）")
+            if (hidden > 0) append("\n已隐藏 $hidden 条：来自不在当前网络的服务器")
+        }
     }
 
     /** 服务端搜索（先查 SCPD 是否支持 Search） */

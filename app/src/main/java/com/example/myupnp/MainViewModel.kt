@@ -272,10 +272,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     /** 播放队列（第 7 课 B）：排队 + 播完自动连播 */
     val playbackQueue = PlaybackQueue()
 
-    /** 队列持久化（第 7 课 A：重启恢复"待播列表"） */
+    /** 队列持久化（第 7 课 A：重启恢复"待播列表"；第 9 课：按网络分开存） */
     private val queuePrefs =
         getApplication<Application>().getSharedPreferences("play_queue", Context.MODE_PRIVATE)
     private var queueRestored = false
+
+    /** 当前队列所属网络（换网络时切换到对应那份队列） */
+    private var queueNet: String? = null
+
+    private fun currentNetKey(): String? = NetworkScope.current()
 
     val subManager = SubscriptionManager(
         mainHandler = mainHandler,
@@ -343,9 +348,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         restoreDeviceCache()
     }
 
-    /** 恢复设备快照（描述里的服务地址都缓存了，恢复后可直接操作） */
+    /** 恢复设备快照（描述里的服务地址都缓存了，恢复后可直接操作；仅限同一网络） */
     private fun restoreDeviceCache() {
-        val cached = runCatching { deviceCache.load() }.getOrDefault(emptyList())
+        val net = currentNetKey()
+        val cached = runCatching { deviceCache.load(net) }.getOrDefault(emptyList())
         if (cached.isEmpty()) return
         registry.restore(cached)
         Log.i(TAG, "[CACHE] 已恢复设备快照 ${cached.size} 台（等待扫描刷新）")
@@ -542,6 +548,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             // 场景 B：引擎在跑但 IP 变了（DHCP 续租 / 换 AP）
             if (ip != lastKnownWifiIp) {
                 Log.w(TAG, "[NET] IP 变化 $lastKnownWifiIp -> $ip，重建订阅与扫描")
+                // 第 9 课：网段变了 = 换网络 → 队列/历史/会话/快照都切到新网络那份
+                val oldNet = NetworkScope.keyOf(lastKnownWifiIp)
+                val newNet = NetworkScope.keyOf(ip)
+                if (oldNet != newNet) onNetworkScopeChanged(newNet)
                 releaseScanResources("IP 变化")
                 if (!startupPending) {
                     startupPending = true
@@ -725,8 +735,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         appendGroup("其他设备（${others.size}）", others)
         _deviceRows.value = rows
         _uiState.update { it.copy(deviceCount = registry.size) }
-        // 存一份快照：切后台/进程被杀回来时，先把这份列表显示出来
-        deviceCache.save(registry.all())
+        // 存一份快照：切后台/进程被杀回来时，先把这份列表显示出来（按网络存，不串网）
+        // 注意：列表被清空（网络变化/清空设备）时不覆盖快照，避免把好东西写没了
+        if (registry.size > 0) deviceCache.save(registry.all(), currentNetKey())
         // 设备列表每次变化后，试着恢复"上次播放"的控制条（设备刚回来时）
         restoreLastSessionIfDeviceBack()
     }
@@ -842,16 +853,35 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     // 第 7 课 A：队列管理（删除/移动/插队）与持久化
     // ------------------------------------------------------------------
 
-    /** 启动时调用一次：恢复上次没播完的"待播列表" */
+    /** 启动时调用一次：恢复上次没播完的"待播列表"（按当前网络那份） */
     fun prepareRestoredQueue() {
         if (queueRestored) return
         queueRestored = true
-        val items = runCatching { readPendingFromPrefs() }.getOrDefault(emptyList())
+        queueNet = currentNetKey()
+        val items = runCatching { readPendingFromPrefs(queueNet) }.getOrDefault(emptyList())
         if (items.isNotEmpty()) {
             playbackQueue.restorePending(items)
-            Log.i(TAG, "[QUEUE] 已恢复 ${items.size} 首待播")
+            Log.i(TAG, "[QUEUE] 已恢复 ${items.size} 首待播（${NetworkScope.labelOf(queueNet)}）")
         }
         syncQueueUi()
+    }
+
+    /** 网络切换：队列/历史/设备快照都切到新网络那份 */
+    private fun onNetworkScopeChanged(newNet: String?) {
+        if (newNet == queueNet) return
+        Log.i(TAG, "[NET] 网络作用域切换 ${NetworkScope.labelOf(queueNet)} → ${NetworkScope.labelOf(newNet)}")
+        queueNet = newNet
+        // 旧网络的待播清单已经持久化过了；换成新网络的清单
+        playbackQueue.clear()
+        val restored = runCatching { readPendingFromPrefs(newNet) }.getOrDefault(emptyList())
+        playbackQueue.restorePending(restored)
+        // 设备快照不跨网络使用
+        deviceCache.clear()
+        syncQueueUi()
+        postMessage(
+            "网络已切换到 ${NetworkScope.labelOf(newNet)}：设备列表重新扫描，" +
+                "队列/历史按当前网络显示" + if (restored.isNotEmpty()) "（该网络有 ${restored.size} 首待播）" else ""
+        )
     }
 
     /** "下一首播放"：插到队首（同曲先移除），当前这首播完自动播它 */
@@ -877,7 +907,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         syncQueueUi()
     }
 
-    /** 把"待播列表"写进 SharedPreferences（JSON） */
+    /** 把"待播列表"写进 SharedPreferences（JSON，按网络分 key） */
     private fun persistQueue() {
         val arr = JSONArray()
         for (item in playbackQueue.snapshotPending()) {
@@ -892,11 +922,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
             )
         }
-        queuePrefs.edit().putString(KEY_QUEUE, arr.toString()).apply()
+        queuePrefs.edit().putString(queueKey(queueNet), arr.toString()).apply()
     }
 
-    private fun readPendingFromPrefs(): List<MediaItem> {
-        val raw = queuePrefs.getString(KEY_QUEUE, "[]") ?: "[]"
+    private fun readPendingFromPrefs(net: String?): List<MediaItem> {
+        val raw = queuePrefs.getString(queueKey(net), "[]") ?: "[]"
         val arr = JSONArray(raw)
         val out = ArrayList<MediaItem>()
         for (i in 0 until arr.length()) {
@@ -915,6 +945,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         return out
     }
 
+    private fun queueKey(net: String?): String = "$KEY_QUEUE_PREFIX${net ?: "unknown"}"
+
     // ------------------------------------------------------------------
     // "记忆上次播放"：持久化上次会话，重启/重扫后自动恢复控制条
     // ------------------------------------------------------------------
@@ -922,13 +954,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val prefs =
         getApplication<Application>().getSharedPreferences("playback_memory", Context.MODE_PRIVATE)
 
-    private data class LastSession(val deviceKey: String?, val deviceName: String, val title: String)
+    private data class LastSession(
+        val deviceKey: String?,
+        val deviceName: String,
+        val title: String,
+        val net: String
+    )
 
     private fun saveLastSession(deviceKey: String?, deviceName: String, title: String) {
         prefs.edit()
             .putString(KEY_DEVICE_KEY, deviceKey)
             .putString(KEY_DEVICE_NAME, deviceName)
             .putString(KEY_TITLE, title)
+            .putString(KEY_SESSION_NET, currentNetKey().orEmpty())
             .apply()
     }
 
@@ -936,7 +974,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val key = prefs.getString(KEY_DEVICE_KEY, null) ?: return null
         val name = prefs.getString(KEY_DEVICE_NAME, null) ?: return null
         val title = prefs.getString(KEY_TITLE, null) ?: return null
-        return LastSession(key, name, title)
+        val net = prefs.getString(KEY_SESSION_NET, "") ?: ""
+        return LastSession(key, name, title, net)
     }
 
     private fun clearLastSession() {
@@ -946,10 +985,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     /**
      * 尝试恢复上次播放会话：目标设备已被重新发现时，重建控制条并查真实状态。
      * 不自动播放 —— 只恢复"上次在播什么"的显示，实际状态用 GetTransportInfo 确认。
+     * 第 9 课：会话按网络归档，换了网络就不恢复（设备根本不在这个网里）。
      */
     fun restoreLastSessionIfDeviceBack() {
         if (nowSession.isActive) return           // 已有会话
         val last = loadLastSession() ?: return
+        val here = currentNetKey().orEmpty()
+        if (last.net.isNotEmpty() && here.isNotEmpty() && last.net != here) {
+            Log.i(TAG, "[MEM] 上次播放属于 ${NetworkScope.labelOf(last.net)}，当前是 ${NetworkScope.labelOf(here)}，跳过恢复")
+            return
+        }
         // 用 deviceKey（=LOCATION）精确定位；找不到再按 friendlyName 试
         val entry = last.deviceKey?.let { registry[it] }
             ?: registry.all().firstOrNull { it.device?.friendlyName == last.deviceName }
@@ -1111,29 +1156,36 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     // 第 7 课 D：播放历史（最近播放，持久化到 PlayHistory）
     // ------------------------------------------------------------------
 
-    /** 推送成功后记录进"最近播放"（UI 重播需要还原成 MediaItem 再走选设备流程） */
+    /** 推送成功后记录进"最近播放"（按当前网络归档，换网络后不会串） */
     fun noteHistoryPlayed(item: MediaItem) {
         playHistory.push(
             title = item.title,
             resUrl = item.resUrl,
             artist = item.artist,
             album = item.album,
-            artUrl = item.artUrl
+            artUrl = item.artUrl,
+            net = currentNetKey().orEmpty()
         )
-        _uiState.update { it.copy(historyCount = playHistory.size) }
+        _uiState.update { it.copy(historyCount = playHistory.size(currentNetKey())) }
     }
 
-    fun historyEntries(): List<PlayHistory.Entry> = playHistory.entries()
+    /** 当前网络的最近播放 */
+    fun historyEntries(): List<PlayHistory.Entry> = playHistory.entries(currentNetKey())
 
     fun historyRemoveAt(position: Int) {
-        playHistory.removeAt(position)
-        _uiState.update { it.copy(historyCount = playHistory.size) }
+        playHistory.removeAt(position, currentNetKey())
+        _uiState.update { it.copy(historyCount = playHistory.size(currentNetKey())) }
     }
 
+    /** 只清空当前网络的记录（别的网络的历史保留） */
     fun historyClear() {
-        playHistory.clear()
-        _uiState.update { it.copy(historyCount = 0) }
+        playHistory.clear(currentNetKey())
+        _uiState.update { it.copy(historyCount = playHistory.size(currentNetKey())) }
     }
+
+    /** 当前在线服务器（用于过滤搜索结果：不在本网络的服务器条目就不展示） */
+    fun presentServerKeys(): Set<String> =
+        registry.all().filter { it.device != null }.map { serverIndexKeyOf(it) }.toSet()
 
     // ------------------------------------------------------------------
     // 第 7 课 B：本地文件推送（手机起 HTTP 服务供渲染器拉流）
@@ -1329,9 +1381,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         private const val KEY_DEVICE_KEY = "device_key"
         private const val KEY_DEVICE_NAME = "device_name"
         private const val KEY_TITLE = "title"
+        private const val KEY_SESSION_NET = "net"
 
-        // 队列持久化
-        private const val KEY_QUEUE = "pending"
+        // 队列持久化（按网络分 key：pending_net:192.168.1）
+        private const val KEY_QUEUE_PREFIX = "pending_"
 
         // 应用状态：用户是否处于"扫描中"（回前台自动续扫）
         private const val KEY_SCAN_WANTED = "scan_wanted"

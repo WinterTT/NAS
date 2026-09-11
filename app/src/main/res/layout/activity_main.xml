@@ -527,6 +527,16 @@
                 android:text="提示：在「媒体库」长按一台服务器，可以收藏置顶 / 重命名。"
                 android:textColor="@color/text_faint"
                 android:textSize="12sp" />
+
+            <TextView
+                android:id="@+id/tvSettingsInfo"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginHorizontal="16dp"
+                android:layout_marginTop="14dp"
+                android:lineSpacingExtra="3dp"
+                android:textColor="@color/text_secondary"
+                android:textSize="12sp" />
         </LinearLayout>
 
         <!-- ========== 页 4：搜索（本地索引 + 服务器搜索，从媒体库进入） ========== -->

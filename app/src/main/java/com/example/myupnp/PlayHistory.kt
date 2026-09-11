@@ -19,7 +19,9 @@ class PlayHistory(context: Context) {
         val artist: String = "",
         val album: String = "",
         val artUrl: String = "",
-        val timeMs: Long = System.currentTimeMillis()
+        val timeMs: Long = System.currentTimeMillis(),
+        /** 第 9 课：所属网络（net:192.168.1）；空 = 旧数据/未知 */
+        val net: String = ""
     )
 
     private val prefs = context.getSharedPreferences("play_history", Context.MODE_PRIVATE)
@@ -27,10 +29,20 @@ class PlayHistory(context: Context) {
     /** 最多保留多少条 */
     val maxEntries = 30
 
-    val size: Int get() = entries().size
+    /** 记录条数（net=null 表示不过滤） */
+    fun size(net: String? = null): Int = entries(net).size
 
-    /** 读全部（新→旧） */
-    fun entries(): List<Entry> {
+    /**
+     * 读记录（新→旧）。
+     * @param net 传当前网络键时只返回该网络的记录（旧的无网络标记数据仍显示）
+     */
+    fun entries(net: String? = null): List<Entry> {
+        val all = entriesAll()
+        if (net == null) return all
+        return all.filter { it.net.isEmpty() || it.net == net }
+    }
+
+    private fun entriesAll(): List<Entry> {
         val raw = prefs.getString(KEY, "[]") ?: "[]"
         return runCatching {
             val arr = JSONArray(raw)
@@ -40,34 +52,48 @@ class PlayHistory(context: Context) {
         }.getOrDefault(emptyList())
     }
 
-    /** 记录一首（去重：同 resUrl 挪到最前；其余顺延，超过上限丢弃尾部） */
+    /**
+     * 记录一首（去重：同 resUrl 挪到最前；其余顺延，超过上限丢弃尾部）。
+     * @param net 当前网络键，换网络后各网络只显示自己的记录
+     */
     fun push(
         title: String,
         resUrl: String,
         artist: String = "",
         album: String = "",
-        artUrl: String = ""
+        artUrl: String = "",
+        net: String = ""
     ) {
         if (resUrl.isBlank()) return
-        val list = entries().toMutableList()
+        val list = entriesAll().toMutableList()
         // 同地址的旧记录先移除（等于"又播了一次，提到最前"）
         list.removeAll { it.resUrl == resUrl && it.title == title }
         list.add(
             0,
-            Entry(title = title, resUrl = resUrl, artist = artist, album = album, artUrl = artUrl)
+            Entry(
+                title = title, resUrl = resUrl, artist = artist, album = album,
+                artUrl = artUrl, net = net
+            )
         )
         save(list.take(maxEntries))
     }
 
-    fun removeAt(position: Int) {
+    /** 删除当前网络视图下的第 position 条 */
+    fun removeAt(position: Int, net: String? = null) {
         if (position < 0) return
-        val list = entries().toMutableList()
-        if (position in list.indices) list.removeAt(position)
+        val target = entries(net).getOrNull(position) ?: return
+        val list = entriesAll().toMutableList()
+        list.removeAll { it.resUrl == target.resUrl && it.title == target.title }
         save(list)
     }
 
-    fun clear() {
-        prefs.edit().remove(KEY).apply()
+    /** 清空：net=null 清全部；否则只清该网络的记录 */
+    fun clear(net: String? = null) {
+        if (net == null) {
+            prefs.edit().remove(KEY).apply()
+            return
+        }
+        save(entriesAll().filterNot { it.net == net })
     }
 
     private fun save(list: List<Entry>) {
@@ -83,6 +109,7 @@ class PlayHistory(context: Context) {
         put("l", e.album)
         put("c", e.artUrl)
         put("m", e.timeMs)
+        put("n", e.net)
     }
 
     private fun fromJson(o: JSONObject): Entry = Entry(
@@ -91,7 +118,8 @@ class PlayHistory(context: Context) {
         artist = o.optString("a"),
         album = o.optString("l"),
         artUrl = o.optString("c"),
-        timeMs = o.optLong("m")
+        timeMs = o.optLong("m"),
+        net = o.optString("n")
     )
 
     private companion object {
