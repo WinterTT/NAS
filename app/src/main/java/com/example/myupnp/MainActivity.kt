@@ -350,7 +350,7 @@ class MainActivity : AppCompatActivity() {
             override fun getItemId(p: Int): Long = p.toLong()
             override fun getView(p: Int, convert: View?, parent: ViewGroup): View {
                 val view = convert
-                    ?: layoutInflater.inflate(R.layout.item_queue_row, parent, false)
+                    ?: layoutInflater.inflate(R.layout.item_song_row, parent, false)
                 val item = searchItems[p]
                 view.findViewById<TextView>(R.id.tvQIndex).text = (p + 1).toString()
                 view.findViewById<TextView>(R.id.tvQTitle).text = item.title
@@ -358,6 +358,10 @@ class MainActivity : AppCompatActivity() {
                     .filter { it.isNotBlank() }
                     .joinToString(" · ")
                 view.findViewById<TextView>(R.id.tvQSub).text = sub.ifEmpty { item.resUrl }
+                // 「＋」= 只把这一首加入队列
+                view.findViewById<ImageButton>(R.id.btnRowAdd).setOnClickListener {
+                    vm.queueEnqueue(item)
+                }
                 return view
             }
         }
@@ -411,29 +415,34 @@ class MainActivity : AppCompatActivity() {
             override fun getCount(): Int = serverRows.size
             override fun getItem(p: Int): Any = serverRows[p]
             override fun getItemId(p: Int): Long = p.toLong()
+            override fun getViewTypeCount(): Int = 2
+            override fun getItemViewType(p: Int): Int =
+                if (serverRows[p] is ServerRow.Song) TYPE_SONG else TYPE_GROUP
+
             override fun getView(p: Int, convert: View?, parent: ViewGroup): View {
-                val view = convert
-                    ?: layoutInflater.inflate(R.layout.item_queue_row, parent, false)
-                val row = serverRows[p]
-                val titleView = view.findViewById<TextView>(R.id.tvQIndex)
-                val nameView = view.findViewById<TextView>(R.id.tvQTitle)
-                val subView = view.findViewById<TextView>(R.id.tvQSub)
-                when (row) {
+                return when (val row = serverRows[p]) {
                     is ServerRow.Group -> {
-                        titleView.text = ""
-                        nameView.text = row.title
-                        subView.text = row.sub
+                        val view = convert ?: layoutInflater.inflate(R.layout.item_queue_row, parent, false)
+                        view.findViewById<TextView>(R.id.tvQIndex).text = ""
+                        view.findViewById<TextView>(R.id.tvQTitle).text = row.title
+                        view.findViewById<TextView>(R.id.tvQSub).text = row.sub
+                        view
                     }
                     is ServerRow.Song -> {
-                        titleView.text = (p + 1).toString()
-                        nameView.text = row.item.title
+                        val view = convert ?: layoutInflater.inflate(R.layout.item_song_row, parent, false)
+                        view.findViewById<TextView>(R.id.tvQIndex).text = (p + 1).toString()
+                        view.findViewById<TextView>(R.id.tvQTitle).text = row.item.title
                         val sub = listOf(row.item.artist, row.item.album)
                             .filter { it.isNotBlank() }
                             .joinToString(" · ")
-                        subView.text = sub.ifEmpty { row.item.resUrl }
+                        view.findViewById<TextView>(R.id.tvQSub).text = sub.ifEmpty { row.item.resUrl }
+                        // 「＋」= 只把这一首加入队列（行点击仍是立即播放）
+                        view.findViewById<ImageButton>(R.id.btnRowAdd).setOnClickListener {
+                            vm.queueEnqueue(row.item)
+                        }
+                        view
                     }
                 }
-                return view
             }
         }
         listServer.adapter = serverAdapter
@@ -1531,8 +1540,6 @@ class MainActivity : AppCompatActivity() {
             categoryTargets.clear()
             val cats = vm.indexCategories(entry)
             val total = cats.sumOf { it.itemCount }
-            serverRows.add(ServerRow.Group("全部媒体", "$total 项 · 跨分类浏览"))
-            categoryTargets.add(null)
             for (c in cats) {
                 serverRows.add(ServerRow.Group(c.title, "${c.itemCount} 项 · ${c.kind}"))
                 categoryTargets.add(c)
@@ -2385,5 +2392,9 @@ class MainActivity : AppCompatActivity() {
 
         /** logcat 统一 TAG：adb logcat -s MyUPNP 过滤 */
         private const val TAG = "MyUPNP"
+
+        /** 服务器分类列表的两种行类型 */
+        private const val TYPE_GROUP = 0
+        private const val TYPE_SONG = 1
     }
 }
