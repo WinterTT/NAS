@@ -278,32 +278,34 @@ class MediaIndexStore(context: Context) :
         val like = "%$kw%"
         // 用 identityKey（曲目键优先）去重：同一首歌被多台服务器/多个视图暴露时只留一条
         val unique = LinkedHashMap<String, IndexEntry>()
-        readableDatabase.rawQuery(
-            """
-            SELECT server_udn, object_id, title, artist, album, upnp_class, res_url, mime, art_url,
-                   dedupe_key, track_key
-            FROM items
-            WHERE res_url <> '' AND (title LIKE ? OR artist LIKE ? OR album LIKE ?)
-            ORDER BY title
-            LIMIT ?
-            """.trimIndent(),
-            arrayOf(like, like, like, limit.toString())
-        ).use { c ->
-            while (c.moveToNext()) {
-                val entry = IndexEntry(
-                    serverUdn = c.getString(0),
-                    objectId = c.getString(1),
-                    title = c.getString(2) ?: "",
-                    artist = c.getString(3) ?: "",
-                    album = c.getString(4) ?: "",
-                    upnpClass = c.getString(5) ?: "",
-                    resUrl = c.getString(6) ?: "",
-                    mime = c.getString(7) ?: "",
-                    artUrl = c.getString(8) ?: "",
-                    dedupeKey = c.getString(9) ?: "",
-                    trackKey = c.getString(10) ?: ""
-                )
-                unique.putIfAbsent(entry.identityKey(), entry)
+        runCatching {
+            readableDatabase.rawQuery(
+                """
+                SELECT server_udn, object_id, title, artist, album, upnp_class, res_url, mime, art_url,
+                       dedupe_key, track_key
+                FROM items
+                WHERE res_url <> '' AND (title LIKE ? OR artist LIKE ? OR album LIKE ?)
+                ORDER BY title
+                LIMIT ?
+                """.trimIndent(),
+                arrayOf(like, like, like, limit.toString())
+            ).use { c ->
+                while (c.moveToNext()) {
+                    val entry = IndexEntry(
+                        serverUdn = c.getString(0),
+                        objectId = c.getString(1),
+                        title = c.getString(2) ?: "",
+                        artist = c.getString(3) ?: "",
+                        album = c.getString(4) ?: "",
+                        upnpClass = c.getString(5) ?: "",
+                        resUrl = c.getString(6) ?: "",
+                        mime = c.getString(7) ?: "",
+                        artUrl = c.getString(8) ?: "",
+                        dedupeKey = c.getString(9) ?: "",
+                        trackKey = c.getString(10) ?: ""
+                    )
+                    unique.putIfAbsent(entry.identityKey(), entry)
+                }
             }
         }
         return unique.values.toList().take(limit)
@@ -313,14 +315,16 @@ class MediaIndexStore(context: Context) :
         var items = 0
         var servers = 0
         var pending = 0
-        readableDatabase.rawQuery("SELECT COUNT(*) FROM items WHERE res_url <> ''", null).use {
-            if (it.moveToFirst()) items = it.getInt(0)
-        }
-        readableDatabase.rawQuery("SELECT COUNT(DISTINCT server_udn) FROM items", null).use {
-            if (it.moveToFirst()) servers = it.getInt(0)
-        }
-        readableDatabase.rawQuery("SELECT COUNT(*) FROM containers WHERE scanned=0", null).use {
-            if (it.moveToFirst()) pending = it.getInt(0)
+        runCatching {
+            readableDatabase.rawQuery("SELECT COUNT(*) FROM items WHERE res_url <> ''", null).use {
+                if (it.moveToFirst()) items = it.getInt(0)
+            }
+            readableDatabase.rawQuery("SELECT COUNT(DISTINCT server_udn) FROM items", null).use {
+                if (it.moveToFirst()) servers = it.getInt(0)
+            }
+            readableDatabase.rawQuery("SELECT COUNT(*) FROM containers WHERE scanned=0", null).use {
+                if (it.moveToFirst()) pending = it.getInt(0)
+            }
         }
         return Stats(items, servers, pending)
     }
@@ -336,48 +340,55 @@ class MediaIndexStore(context: Context) :
     data class ArtistRow(val artist: String, val songCount: Int, val albumCount: Int)
 
     fun countForServer(serverUdn: String): Int {
-        readableDatabase.rawQuery(
-            "SELECT COUNT(*) FROM items WHERE server_udn=? AND res_url <> ''",
-            arrayOf(serverUdn)
-        ).use { c -> return if (c.moveToFirst()) c.getInt(0) else 0 }
+        var count = 0
+        runCatching {
+            readableDatabase.rawQuery(
+                "SELECT COUNT(*) FROM items WHERE server_udn=? AND res_url <> ''",
+                arrayOf(serverUdn)
+            ).use { c -> if (c.moveToFirst()) count = c.getInt(0) }
+        }
+        return count
     }
 
     /** 顶层分类（音乐 / 视频 / 图片…）：按条数排序，附带"主要媒体类型" */
     fun categories(serverUdn: String): List<CategoryRow> {
         val out = ArrayList<CategoryRow>()
-        readableDatabase.rawQuery(
-            """
-            SELECT top_id, top_title,
-                   COUNT(*) AS c,
-                   SUM(CASE WHEN upnp_class LIKE '%audio%' OR mime LIKE 'audio%' THEN 1 ELSE 0 END) AS aud,
-                   SUM(CASE WHEN upnp_class LIKE '%video%' OR mime LIKE 'video%' THEN 1 ELSE 0 END) AS vid,
-                   SUM(CASE WHEN upnp_class LIKE '%image%' OR mime LIKE 'image%' THEN 1 ELSE 0 END) AS img
-            FROM items
-            WHERE server_udn=? AND res_url <> ''
-            GROUP BY top_id
-            ORDER BY c DESC
-            """.trimIndent(),
-            arrayOf(serverUdn)
-        ).use { c ->
-            while (c.moveToNext()) {
-                val count = c.getInt(2)
-                val aud = c.getInt(3)
-                val vid = c.getInt(4)
-                val img = c.getInt(5)
-                val kind = when {
-                    aud >= vid && aud >= img && aud > 0 -> "音乐"
-                    vid >= aud && vid >= img && vid > 0 -> "视频"
-                    img >= aud && img >= vid && img > 0 -> "图片"
-                    else -> "其他"
-                }
-                out.add(
-                    CategoryRow(
-                        topId = c.getString(0) ?: "",
-                        title = c.getString(1) ?: "未分类",
-                        itemCount = count,
-                        kind = kind
+        // 防御：万一库结构与代码不一致（升级异常等），返回空而不是崩掉界面
+        runCatching {
+            readableDatabase.rawQuery(
+                """
+                SELECT top_id, top_title,
+                       COUNT(*) AS c,
+                       SUM(CASE WHEN upnp_class LIKE '%audio%' OR mime LIKE 'audio%' THEN 1 ELSE 0 END) AS aud,
+                       SUM(CASE WHEN upnp_class LIKE '%video%' OR mime LIKE 'video%' THEN 1 ELSE 0 END) AS vid,
+                       SUM(CASE WHEN upnp_class LIKE '%image%' OR mime LIKE 'image%' THEN 1 ELSE 0 END) AS img
+                FROM items
+                WHERE server_udn=? AND res_url <> ''
+                GROUP BY top_id
+                ORDER BY c DESC
+                """.trimIndent(),
+                arrayOf(serverUdn)
+            ).use { c ->
+                while (c.moveToNext()) {
+                    val count = c.getInt(2)
+                    val aud = c.getInt(3)
+                    val vid = c.getInt(4)
+                    val img = c.getInt(5)
+                    val kind = when {
+                        aud >= vid && aud >= img && aud > 0 -> "音乐"
+                        vid >= aud && vid >= img && vid > 0 -> "视频"
+                        img >= aud && img >= vid && img > 0 -> "图片"
+                        else -> "其他"
+                    }
+                    out.add(
+                        CategoryRow(
+                            topId = c.getString(0) ?: "",
+                            title = c.getString(1) ?: "未分类",
+                            itemCount = count,
+                            kind = kind
+                        )
                     )
-                )
+                }
             }
         }
         return out
@@ -465,32 +476,35 @@ class MediaIndexStore(context: Context) :
 
     private fun query(whereClause: String, args: Array<String>): List<IndexEntry> {
         val out = ArrayList<IndexEntry>()
-        readableDatabase.rawQuery(
-            """
-            SELECT server_udn, object_id, title, artist, album, upnp_class, res_url, mime, art_url,
-                   dedupe_key, track_key, top_id, top_title
-            FROM items $whereClause
-            """.trimIndent(),
-            args
-        ).use { c ->
-            while (c.moveToNext()) {
-                out.add(
-                    IndexEntry(
-                        serverUdn = c.getString(0),
-                        objectId = c.getString(1),
-                        title = c.getString(2) ?: "",
-                        artist = c.getString(3) ?: "",
-                        album = c.getString(4) ?: "",
-                        upnpClass = c.getString(5) ?: "",
-                        resUrl = c.getString(6) ?: "",
-                        mime = c.getString(7) ?: "",
-                        artUrl = c.getString(8) ?: "",
-                        dedupeKey = c.getString(9) ?: "",
-                        trackKey = c.getString(10) ?: "",
-                        topId = c.getString(11) ?: "",
-                        topTitle = c.getString(12) ?: ""
+        // 防御：库结构与代码不一致时返回空列表，不崩界面
+        runCatching {
+            readableDatabase.rawQuery(
+                """
+                SELECT server_udn, object_id, title, artist, album, upnp_class, res_url, mime, art_url,
+                       dedupe_key, track_key, top_id, top_title
+                FROM items $whereClause
+                """.trimIndent(),
+                args
+            ).use { c ->
+                while (c.moveToNext()) {
+                    out.add(
+                        IndexEntry(
+                            serverUdn = c.getString(0),
+                            objectId = c.getString(1),
+                            title = c.getString(2) ?: "",
+                            artist = c.getString(3) ?: "",
+                            album = c.getString(4) ?: "",
+                            upnpClass = c.getString(5) ?: "",
+                            resUrl = c.getString(6) ?: "",
+                            mime = c.getString(7) ?: "",
+                            artUrl = c.getString(8) ?: "",
+                            dedupeKey = c.getString(9) ?: "",
+                            trackKey = c.getString(10) ?: "",
+                            topId = c.getString(11) ?: "",
+                            topTitle = c.getString(12) ?: ""
+                        )
                     )
-                )
+                }
             }
         }
         return out
@@ -503,6 +517,8 @@ class MediaIndexStore(context: Context) :
 
     private companion object {
         const val DB_NAME = "media_index.db"
-        const val DB_VERSION = 3
+
+        /** v4：新增顶层分类字段（top_id/top_title）。改动 schema 必须同步 +1，否则升级不会执行 */
+        const val DB_VERSION = 4
     }
 }
