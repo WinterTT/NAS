@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">My UPNP</string>
+    <string name="app_name">DomoCast</string>
     <string name="btn_start">开始扫描</string>
     <string name="btn_stop">停止</string>
     <string name="btn_clear">清空设备</string>

@@ -9,7 +9,7 @@
 
 从零手写实现的 **DLNA / UPnP 控制点 Android App**（Kotlin，自研协议栈，不依赖第三方 UPnP 库），
 用于把家里的 DLNA 音箱 / 电视 / PC 媒体服务器统一成一个"遥控器 + 媒体库"。
-包名 `com.example.myupnp`（**发布前必须改**）。中文界面，面向普通用户做产品化。
+正式包名 `com.domocast.remote`。中文界面，面向普通用户做产品化。
 
 定位：**精简易用**；广告将来接入但不能打断播放；后续收费方向是"帮用户管理服务器"（建目录/清理/推荐）。
 
@@ -62,7 +62,7 @@ $env:ANDROID_USER_HOME='<工程根>\.android-home'
 ## 4. 代码地图（速查）
 
 ```
-app/src/main/java/com/example/myupnp/
+app/src/main/java/com/domocast/remote/
 ├── MainActivity.kt          UI 编排：三个 Tab（媒体库/播放/设置）+ 搜索页 + 服务器分类页 + 各种对话框
 ├── MainViewModel.kt         唯一编排中枢：线程池/Handler、UiState、扫描子系统、队列记账、索引进度回调
 ├── DeviceRegistry.kt        设备注册表：增删/心跳清理/描述拉取/快照恢复
@@ -122,7 +122,7 @@ app/src/main/java/com/example/myupnp/
 ## 7. 下一步候选（按讨论顺序）
 
 1. 媒体库页内嵌浏览（替代弹窗式浏览）。
-2. **可发布化**：改包名（`com.example.myupnp` 必须改）、定应用名、真图标、关于/隐私政策/开源许可页、
+2. **可发布化**：定应用名、真图标、关于/隐私政策/开源许可页、
    Release 签名 + AAB、商店素材（截图/描述/Data safety）、`NO_ADS` 与广告接入时机。
 3. 服务器助手（收费方向）：基于索引做重复清理、目录整理、推荐。
 4. 本机播放若遇平台/ExoPlayer 都解不了的格式（WMA/APE/DSD）才考虑 libVLC/FFmpeg（体积与许可成本高）。

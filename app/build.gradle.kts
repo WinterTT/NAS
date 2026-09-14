@@ -3,13 +3,13 @@ plugins {
 }
 
 android {
-    namespace = "com.example.myupnp"
+    namespace = "com.domocast.remote"
     compileSdk {
         version = release(37)
     }
 
     defaultConfig {
-        applicationId = "com.example.myupnp"
+        applicationId = "com.domocast.remote"
         minSdk = 24
         targetSdk = 37
         versionCode = 1
