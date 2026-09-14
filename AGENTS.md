@@ -68,13 +68,14 @@ app/src/main/java/com/example/myupnp/
 ├── DeviceRegistry.kt        设备注册表：增删/心跳清理/描述拉取/快照恢复
 ├── SubscriptionManager.kt   GENA 订阅生命周期
 ├── NowPlayingSession.kt     DLNA 播放会话：进度/音量/播完判定（事件 + 兜底轮询）
-├── LocalPlayer.kt           本机音频播放（MediaPlayer，URL 编码 + 错误诊断）
+├── LocalPlayer.kt           本机音频播放（**Media3 ExoPlayer**，URL 编码 + 错误诊断 + 读内嵌封面）
 ├── PlaybackQueue.kt         队列：待播 pending / 当前 current / 已播 history（纯逻辑）
 ├── PlayHistory.kt           最近播放（按网络，JSON 持久化）
 ├── DeviceBookmarks.kt       设备收藏 / 别名（按 UDN 稳定键）
 ├── DeviceCache.kt           设备列表快照（按网络；切后台/杀进程后列表不空）
 ├── MediaIndexStore.kt       曲库索引（SQLite：分类/去重/搜索/分专辑歌手查询）
 ├── LibraryIndexer.kt        后台 BFS 建索引（可停/可续扫，统计跳过重复）
+├── LocalMusicIndexer.kt     手机本地音乐索引（MediaStore → 同一张索引表，key=local:mediastore）
 ├── LocalFileServer.kt       手机当媒体源：HTTP 文件服务（支持 Range）
 ├── ImagePreviewActivity.kt  图片预览（双指缩放/拖动/轻点关闭）
 ├── NetworkScope.kt          网络作用域（按网段 net:192.168.1 隔离数据）
@@ -89,6 +90,8 @@ app/src/main/java/com/example/myupnp/
   拿不到就按设备类型"推测"（标 `?`）或标 `❔`，不用于拦截。
 - **索引去重三重键**：归一化 URL / **文件大小+时长** / 标题+歌手+专辑（DLNA 同一文件常有多视图多 URL）。
 - **数据按网络隔离**：设备列表、队列、历史、上次会话、设备快照各按网段存一份；收藏/别名跟设备走。
+- **手机本地音乐**是同一张索引表里的一个"伪源"（`local:mediastore`），因此**复用同一套分类浏览与搜索**；
+  手机文件的 `content://` 地址设备拿不到 → 只能本机播放（或交系统播放器）。
 
 ---
 
@@ -101,7 +104,11 @@ app/src/main/java/com/example/myupnp/
 - 设备管理：收藏置顶、别名重命名、能力探测与标注、记住上次推送的设备
 - 索引与搜索：SQLite 本地索引（可停/续扫/去重/分类）→ 音乐/视频/图片分类 → 专辑/歌手/歌曲 →
   全部播放·全部入队·单个入队（行尾 ⋮ 菜单）、服务器 `Search` 兜底、跨服务器去重
-- 本机媒体：音乐用 App 播放页本机播放（含本机连播）、视频交系统播放器（VLC 等）、图片预览页
+- 本机媒体：音乐用 App 播放页本机播放（**Media3 ExoPlayer**，含本机连播、读内嵌封面）、
+  视频交系统播放器（VLC 等）、图片预览页
+- **手机本地音乐**：MediaStore 扫描（只申请 `READ_MEDIA_AUDIO`，不用全盘权限）→ 写入同一张索引表 →
+  媒体库页「手机本地音乐（N 首）」入口 → **同一套分类浏览（专辑/歌手/歌曲）与搜索**，点歌即本机播放
+- **播放模式**：顺序 / 列表循环 / 单曲循环 / 随机（播放页按钮循环切换，按网络记忆）
 - UI：底部三 Tab（媒体库/播放/设置）、播放大卡（深色沉浸）、深浅色主题、首启三步引导
 - 本地文件推送：手机起 HTTP 服务（支持 Range）推给设备
 
@@ -114,13 +121,14 @@ app/src/main/java/com/example/myupnp/
 
 ## 7. 下一步候选（按讨论顺序）
 
-1. **本机播放格式兜底**：接入 **AndroidX Media3 / ExoPlayer**（Apache-2.0，体积可控），覆盖 MKV/OPUS/FLAC；
-   仅当需要 WMA/APE/DSD 才考虑 libVLC/FFmpeg（体积与许可成本高）。
-2. 播放模式：随机 / 单曲循环 / 列表循环。
-3. 媒体库页内嵌浏览（替代弹窗式浏览）。
-4. **可发布化**：改包名（`com.example.myupnp` 必须改）、定应用名、真图标、关于/隐私政策/开源许可页、
+1. 媒体库页内嵌浏览（替代弹窗式浏览）。
+2. **可发布化**：改包名（`com.example.myupnp` 必须改）、定应用名、真图标、关于/隐私政策/开源许可页、
    Release 签名 + AAB、商店素材（截图/描述/Data safety）、`NO_ADS` 与广告接入时机。
-5. 服务器助手（收费方向）：基于索引做重复清理、目录整理、推荐。
+3. 服务器助手（收费方向）：基于索引做重复清理、目录整理、推荐。
+4. 本机播放若遇平台/ExoPlayer 都解不了的格式（WMA/APE/DSD）才考虑 libVLC/FFmpeg（体积与许可成本高）。
+
+已完成但值得留意的扩展点：本机音乐索引只收录**系统媒体库已入库**的音频（MediaStore），
+未入库的散落文件不在其中（这是"不申请全盘权限"的取舍）。
 
 ## 8. 相关文档
 

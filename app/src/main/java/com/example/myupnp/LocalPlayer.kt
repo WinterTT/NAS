@@ -2,6 +2,7 @@ package com.example.myupnp
 
 import android.content.Context
 import android.media.AudioManager
+import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.os.Handler
 import android.util.Log
@@ -12,6 +13,7 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import com.example.myupnp.model.MediaItem
+import java.util.concurrent.ExecutorService
 
 /**
  * 本机音乐播放器（第 13 课：本机播放只处理音频，复用 App 的播放页）
@@ -28,6 +30,7 @@ import com.example.myupnp.model.MediaItem
  */
 class LocalPlayer(
     private val mainHandler: Handler,
+    private val fetchExecutor: ExecutorService,
     private val listener: Listener
 ) {
 
@@ -40,10 +43,18 @@ class LocalPlayer(
 
         /** 出错（已给出可读原因） */
         fun onLocalError(message: String)
+
+        /** 本地文件的内嵌封面已读取；null 表示没有或读取失败 */
+        fun onLocalArtworkChanged()
     }
 
     private var player: ExoPlayer? = null
     private var appContext: Context? = null
+    private var artworkRequestId = 0L
+
+    /** 本地文件标签中的内嵌封面；仅供 ViewModel 写入 UiState，不直接碰 View。 */
+    var artworkBytes: ByteArray? = null
+        private set
 
     private val playerListener = object : Player.Listener {
         override fun onPlaybackStateChanged(playbackState: Int) {
@@ -78,6 +89,7 @@ class LocalPlayer(
         appContext = context.applicationContext
         stopInternal()
         current = item
+        requestEmbeddedArtwork(context.applicationContext, item)
         try {
             val url = item.resUrl
             val uri = Uri.parse(if (url.startsWith("content://")) url else encodeUrl(url))
@@ -112,6 +124,8 @@ class LocalPlayer(
         val item = current
         stopInternal()
         current = null
+        artworkRequestId++
+        artworkBytes = null
         Log.i(TAG, "[LOCAL] 停止本机播放: ${item?.title ?: "-"}")
         listener.onLocalStateChanged()
     }
@@ -148,12 +162,41 @@ class LocalPlayer(
     fun release() {
         stopInternal()
         current = null
+        artworkRequestId++
+        artworkBytes = null
     }
 
     private fun stopInternal() {
         player?.removeListener(playerListener)
         player?.release()
         player = null
+    }
+
+    /**
+     * 只对手机本地 content:// 文件读取 ID3/FLAC 等标签中的封面；网络曲目继续用服务器 artUrl。
+     * MediaMetadataRetriever 可能阻塞，必须放 VM 注入的后台线程。
+     */
+    private fun requestEmbeddedArtwork(context: Context, item: MediaItem) {
+        val requestId = ++artworkRequestId
+        artworkBytes = null
+        listener.onLocalArtworkChanged()
+        val uri = item.resUrl.takeIf { it.startsWith("content://") } ?: return
+        fetchExecutor.execute {
+            val bytes = runCatching {
+                val retriever = MediaMetadataRetriever()
+                try {
+                    retriever.setDataSource(context, Uri.parse(uri))
+                    retriever.embeddedPicture?.takeIf { it.size <= MAX_ART_BYTES }
+                } finally {
+                    retriever.release()
+                }
+            }.getOrNull()
+            mainHandler.post {
+                if (requestId != artworkRequestId || current != item) return@post
+                artworkBytes = bytes
+                listener.onLocalArtworkChanged()
+            }
+        }
     }
 
     /** Media3 错误码 → 人话 */
@@ -192,5 +235,6 @@ class LocalPlayer(
 
     private companion object {
         const val TAG = "MyUPNP"
+        const val MAX_ART_BYTES = 4 * 1024 * 1024
     }
 }

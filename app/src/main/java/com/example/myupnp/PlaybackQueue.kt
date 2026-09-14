@@ -2,6 +2,16 @@ package com.example.myupnp
 
 import com.example.myupnp.model.MediaItem
 
+/** 队列播放方式；由 ViewModel 按网络持久化，队列本身只负责选歌与记账。 */
+enum class PlaybackMode(val label: String) {
+    SEQUENTIAL("顺序播放"),
+    REPEAT_ALL("列表循环"),
+    REPEAT_ONE("单曲循环"),
+    SHUFFLE("随机播放");
+
+    fun next(): PlaybackMode = entries[(ordinal + 1) % entries.size]
+}
+
 /**
  * 播放队列（第 7 课 B：点歌排队 / 播完自动连播）
  * ------------------------------------------------------------------
@@ -34,6 +44,18 @@ class PlaybackQueue {
     /** 下一首（自动连播 / 下一首按钮的目标） */
     val nextUp: MediaItem? get() = pending.firstOrNull()
 
+    /**
+     * 预览下一首，不改变队列。自动播完时才遵守单曲循环；用户主动点“下一首”仍会切歌。
+     */
+    fun nextUp(mode: PlaybackMode, automatic: Boolean): MediaItem? {
+        if (automatic && mode == PlaybackMode.REPEAT_ONE) return current
+        if (pending.isNotEmpty()) {
+            return if (mode == PlaybackMode.SHUFFLE) pending.random() else pending.first()
+        }
+        if (mode == PlaybackMode.REPEAT_ALL) return history.firstOrNull() ?: current
+        return null
+    }
+
     /** 上一首（最近播完的，可回放） */
     val previousUp: MediaItem? get() = history.lastOrNull()
 
@@ -54,6 +76,30 @@ class PlaybackQueue {
         archiveCurrent()
         current = item
         return true
+    }
+
+    /** 与 [nextUp] 对应的提交：只在推送/本机切歌成功后调用。 */
+    fun commitNext(item: MediaItem, mode: PlaybackMode, automatic: Boolean): Boolean {
+        if (automatic && mode == PlaybackMode.REPEAT_ONE && current?.let { same(it, item) } == true) {
+            return true // 重播当前曲，不归档、不改队列
+        }
+        val pendingIndex = pending.indexOfFirst { same(it, item) }
+        if (pendingIndex >= 0) {
+            pending.removeAt(pendingIndex) // 随机模式可能不是队首
+            archiveCurrent()
+            current = item
+            return true
+        }
+        if (mode == PlaybackMode.REPEAT_ALL) {
+            // 一轮播完：历史按原播放顺序，加上当前曲，组成下一轮待播。
+            val cycle = history.toList() + listOfNotNull(current)
+            if (cycle.firstOrNull()?.let { same(it, item) } != true) return false
+            history.clear()
+            pending.addAll(cycle.drop(1))
+            current = item
+            return true
+        }
+        return false
     }
 
     /** 推送成功后的记账：把 [item] 从历史取回重播，当前曲放回队首（播完再接上） */

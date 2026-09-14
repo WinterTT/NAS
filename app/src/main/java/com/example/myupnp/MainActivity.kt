@@ -77,6 +77,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var pageSettings: View
     private lateinit var pageSearch: View
     private lateinit var btnSearchEntry: TextView
+    private lateinit var btnLocalMusicEntry: TextView
     private lateinit var btnSearchBack: Button
     private lateinit var etSearch: android.widget.EditText
     private lateinit var tvSearchStatus: TextView
@@ -114,6 +115,12 @@ class MainActivity : AppCompatActivity() {
     private val serverRows = ArrayList<ServerRow>()
     private var serverEntry: Entry? = null
     private var serverCds: UpnpService? = null
+
+    /** 当前分类页的数据源键（服务器 UDN / 本机媒体源键） */
+    private var serverKey: String? = null
+
+    /** 当前分类页是不是"手机本地音乐" */
+    private var serverIsLocal = false
 
     /** 0=顶层分类（音乐/视频/图片…） 1=分类内（专辑/歌手/歌曲） 2=某专辑/某歌手详情 */
     private var serverStage = 0
@@ -154,6 +161,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var tvNowVolume: TextView
     private lateinit var btnNowPrev: ImageButton
     private lateinit var btnNowNext: ImageButton
+    private lateinit var btnNowMode: Button
     private lateinit var tvNowQueue: TextView
     private lateinit var btnPushLocal: Button
     private lateinit var btnQueueQuick: Button
@@ -242,6 +250,12 @@ class MainActivity : AppCompatActivity() {
             uri?.let { pushLocalMedia(it) }
         }
 
+    private val localMusicPermissionLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            if (granted) buildLocalMusicIndex()
+            else Toast.makeText(this, "需要「音乐和音频」权限才能建立本机音乐索引", Toast.LENGTH_LONG).show()
+        }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -280,6 +294,7 @@ class MainActivity : AppCompatActivity() {
         pageSettings = findViewById(R.id.pageSettings)
         pageSearch = findViewById(R.id.pageSearch)
         btnSearchEntry = findViewById(R.id.btnSearchEntry)
+        btnLocalMusicEntry = findViewById(R.id.btnLocalMusicEntry)
         btnSearchBack = findViewById(R.id.btnSearchBack)
         etSearch = findViewById(R.id.etSearch)
         tvSearchStatus = findViewById(R.id.tvSearchStatus)
@@ -322,6 +337,7 @@ class MainActivity : AppCompatActivity() {
         tvNowVolume = findViewById(R.id.tvNowVolume)
         btnNowPrev = findViewById(R.id.btnNowPrev)
         btnNowNext = findViewById(R.id.btnNowNext)
+        btnNowMode = findViewById(R.id.btnNowMode)
         tvNowQueue = findViewById(R.id.tvNowQueue)
         imgNowArt = findViewById(R.id.imgNowArt)
         tvNowMeta = findViewById(R.id.tvNowMeta)
@@ -336,15 +352,14 @@ class MainActivity : AppCompatActivity() {
         // 切歌
         btnNowPrev.setOnClickListener { vm.queuePreviousItem() }
         btnNowNext.setOnClickListener { vm.queueNextItem() }
+        btnNowMode.setOnClickListener { vm.cyclePlaybackMode() }
         // 队列
         tvNowQueue.setOnClickListener { showQueueDialog() }
         btnQueueQuick.setOnClickListener { showQueueDialog() }
         // 最近播放（第 7 课 D）
         btnRecentQuick.setOnClickListener { showHistoryDialog() }
         // 本地文件推送（第 7 课 B）
-        btnPushLocal.setOnClickListener {
-            localFileLauncher.launch(arrayOf("audio/*", "video/*", "image/*"))
-        }
+        btnPushLocal.setOnClickListener { showLocalMediaMenu() }
 
         // ===== 第 8 课：搜索与索引 =====
         searchAdapter = object : android.widget.BaseAdapter() {
@@ -378,6 +393,14 @@ class MainActivity : AppCompatActivity() {
             true
         }
         btnSearchEntry.setOnClickListener { showSearchPage(true) }
+        // 手机本地音乐：有索引就进分类浏览，没索引就引导建索引；长按=重新扫描
+        btnLocalMusicEntry.setOnClickListener {
+            if (vm.localMusicCount() > 0) openLocalMusicPage() else requestLocalMusicIndex()
+        }
+        btnLocalMusicEntry.setOnLongClickListener {
+            requestLocalMusicIndex()
+            true
+        }
         btnSearchBack.setOnClickListener { showSearchPage(false) }
         etSearch.addTextChangedListener(object : android.text.TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) = Unit
@@ -504,7 +527,13 @@ class MainActivity : AppCompatActivity() {
                 else -> closeServerPage()
             }
         }
-        btnServerBrowse.setOnClickListener { serverCds?.let { showMediaBrowser(it) } }
+        btnServerBrowse.setOnClickListener {
+            if (serverIsLocal) {
+                requestLocalMusicIndex() // 手机本地源：这个位置用于"重新扫描"
+            } else {
+                serverCds?.let { showMediaBrowser(it) }
+            }
+        }
         btnTabAlbums.setOnClickListener { switchServerMode(0) }
         btnTabArtists.setOnClickListener { switchServerMode(1) }
         btnTabSongs.setOnClickListener { switchServerMode(2) }
@@ -706,9 +735,14 @@ class MainActivity : AppCompatActivity() {
 
                     // 队列 / 元数据 / 封面
                     tvNowQueue.text = "队列(${s.queuePendingCount})"
+                    btnNowMode.text = s.playbackMode.label
                     tvNowMeta.text = meta
                     tvNowMeta.visibility = if (meta.isEmpty()) View.GONE else View.VISIBLE
-                    loadArtwork(s.nowPlayingArtUrl)
+                    if (s.nowPlayingArtBytes != null) {
+                        loadEmbeddedArtwork(s.nowPlayingArtBytes)
+                    } else {
+                        loadArtwork(s.nowPlayingArtUrl)
+                    }
                 } else {
                     nowPlayingBar.visibility = View.GONE
                     miniNowBar.visibility = View.GONE
@@ -1254,6 +1288,39 @@ class MainActivity : AppCompatActivity() {
     // ------------------------------------------------------------------
 
     /** 选了本地文件：推送设备 / 本机播放（音乐走 App 播放页，视频交系统播放器）/ 预览图片 */
+    private fun showLocalMediaMenu() {
+        AlertDialog.Builder(this)
+            .setTitle("本地媒体")
+            .setItems(arrayOf("选择一个文件", "建立本机音乐索引（${vm.localMusicCount()} 首）")) { _, which ->
+                if (which == 0) localFileLauncher.launch(arrayOf("audio/*", "video/*", "image/*"))
+                else requestLocalMusicIndex()
+            }
+            .show()
+    }
+
+    private fun requestLocalMusicIndex() {
+        val permission = if (Build.VERSION.SDK_INT >= 33) Manifest.permission.READ_MEDIA_AUDIO
+        else Manifest.permission.READ_EXTERNAL_STORAGE
+        if (ContextCompat.checkSelfPermission(this, permission) == PackageManager.PERMISSION_GRANTED) {
+            buildLocalMusicIndex()
+        } else {
+            localMusicPermissionLauncher.launch(permission)
+        }
+    }
+
+    private fun buildLocalMusicIndex() {
+        Toast.makeText(this, "正在建立本机音乐索引…", Toast.LENGTH_SHORT).show()
+        vm.startLocalMusicIndex { count, error ->
+            val message = if (error == null) "本机音乐索引完成：$count 首" else "本机音乐索引失败：$error"
+            Toast.makeText(this, message, Toast.LENGTH_LONG).show()
+            refreshLibraryRows() // 刷新入口上的数量
+            if (error == null) {
+                updateSearchStatus()
+                openLocalMusicPage() // 扫完直接进"手机本地音乐"分类页
+            }
+        }
+    }
+
     private fun pushLocalMedia(uri: Uri) {
         val name = queryLocalFileName(uri)
         val lower = name.lowercase()
@@ -1504,6 +1571,11 @@ class MainActivity : AppCompatActivity() {
             libraryAdapter.notifyDataSetChanged()
             tvLibEmpty.visibility = if (libraryServers.isEmpty()) View.VISIBLE else View.GONE
         }
+        if (::btnLocalMusicEntry.isInitialized) {
+            val count = vm.localMusicCount()
+            btnLocalMusicEntry.text =
+                if (count > 0) "手机本地音乐（$count 首）· 点此浏览" else "手机本地音乐 · 点此建立索引"
+        }
     }
 
     /** 设置页：显示当前网络与数据作用域说明 */
@@ -1536,6 +1608,8 @@ class MainActivity : AppCompatActivity() {
     private fun openServerPage(entry: Entry, cds: UpnpService) {
         serverEntry = entry
         serverCds = cds
+        serverKey = vm.serverIndexKeyOf(entry)
+        serverIsLocal = false
         serverStage = 0          // 先进"顶层分类"页
         serverCategoryId = null
         serverCategoryTitle = "全部媒体"
@@ -1545,6 +1619,27 @@ class MainActivity : AppCompatActivity() {
         pageLibrary.visibility = View.GONE
         pageSearch.visibility = View.GONE
         tvServerTitle.text = vm.shownNameOf(entry)
+        btnServerBrowse.text = "文件夹"
+        updateServerTabs()
+        refreshServerRows()
+    }
+
+    /** 打开"手机本地音乐"分类页（与服务器共用同一套分类浏览，只是数据源是本机索引） */
+    private fun openLocalMusicPage() {
+        serverEntry = null
+        serverCds = null
+        serverKey = vm.localMediaKey()
+        serverIsLocal = true
+        serverStage = 0
+        serverCategoryId = null
+        serverCategoryTitle = "全部"
+        serverMode = 0
+        serverFilter = null
+        pageServer.visibility = View.VISIBLE
+        pageLibrary.visibility = View.GONE
+        pageSearch.visibility = View.GONE
+        tvServerTitle.text = "手机本地音乐"
+        btnServerBrowse.text = "重新扫描" // 本机源没有"文件夹"，这个位置改成重建索引
         updateServerTabs()
         refreshServerRows()
     }
@@ -1553,6 +1648,8 @@ class MainActivity : AppCompatActivity() {
         pageServer.visibility = View.GONE
         serverEntry = null
         serverCds = null
+        serverKey = null
+        serverIsLocal = false
         serverFilter = null
         showPage(
             when (currentTabId) {
@@ -1603,25 +1700,32 @@ class MainActivity : AppCompatActivity() {
         scopeRow.visibility = if (show) View.VISIBLE else View.GONE
     }
 
-    /** 按当前层级/模式刷新列表 */
+    /** 按当前层级/模式刷新列表（数据源由 [serverKey] 决定：服务器 / 手机本地） */
     private fun refreshServerRows() {
-        val entry = serverEntry ?: return
+        val key = serverKey ?: return
         serverRows.clear()
 
         // ---- 第 0 层：顶层分类（音乐 / 视频 / 图片…）----
         if (serverStage == 0) {
             categoryTargets.clear()
-            val cats = vm.indexCategories(entry)
+            val cats = vm.indexCategoriesOf(key)
             val total = cats.sumOf { it.itemCount }
             for (c in cats) {
                 serverRows.add(ServerRow.Group(c.title, "${c.itemCount} 项 · ${c.kind}"))
                 categoryTargets.add(c)
             }
-            tvServerStatus.text =
+            tvServerStatus.text = if (serverIsLocal) {
+                "本机音乐：${total} 首（来自系统媒体库）\n点分类进入，可按专辑 / 歌手 / 歌曲浏览"
+            } else {
                 "共 ${cats.size} 个分类 · ${total} 项\n点一个分类进入（音乐/视频/图片由服务器目录决定）"
+            }
             serverAdapter.notifyDataSetChanged()
             tvServerEmpty.visibility = if (serverRows.isEmpty()) View.VISIBLE else View.GONE
-            tvServerEmpty.text = "索引里没有分类信息\n可以点右上「文件夹」直接浏览，或重新建立索引"
+            tvServerEmpty.text = if (serverIsLocal) {
+                "本机索引为空：点右上「重新扫描」，或先在「本地媒体」里建立索引"
+            } else {
+                "索引里没有分类信息\n可以点右上「文件夹」直接浏览，或重新建立索引"
+            }
             updateScopeRowVisibility()
             return
         }
@@ -1633,7 +1737,7 @@ class MainActivity : AppCompatActivity() {
         when (serverMode) {
             0 -> { // 专辑
                 if (filter == null) {
-                    val albums = vm.indexAlbums(entry, topId)
+                    val albums = vm.indexAlbumsOf(key, topId)
                     albums.forEach { a ->
                         serverRows.add(
                             ServerRow.Group(
@@ -1647,7 +1751,7 @@ class MainActivity : AppCompatActivity() {
                     tvServerStatus.text =
                         prefix + "专辑 ${albums.size} 张 · 共 ${albums.sumOf { it.songCount }} 首"
                 } else {
-                    val songs = vm.indexSongsByAlbum(entry, filter, topId)
+                    val songs = vm.indexSongsByAlbumOf(key, filter, topId)
                     songs.forEach { serverRows.add(ServerRow.Song(it.toMediaItem())) }
                     tvServerStatus.text = "《$filter》 ${songs.size} 首"
                 }
@@ -1655,7 +1759,7 @@ class MainActivity : AppCompatActivity() {
 
             1 -> { // 歌手
                 if (filter == null) {
-                    val artists = vm.indexArtists(entry, topId)
+                    val artists = vm.indexArtistsOf(key, topId)
                     artists.forEach { a ->
                         serverRows.add(
                             ServerRow.Group(
@@ -1667,16 +1771,17 @@ class MainActivity : AppCompatActivity() {
                     tvServerStatus.text =
                         prefix + "歌手 ${artists.size} 位 · 共 ${artists.sumOf { it.songCount }} 首"
                 } else {
-                    val songs = vm.indexSongsByArtist(entry, filter, topId)
+                    val songs = vm.indexSongsByArtistOf(key, filter, topId)
                     songs.forEach { serverRows.add(ServerRow.Song(it.toMediaItem())) }
                     tvServerStatus.text = "$filter ${songs.size} 首"
                 }
             }
 
             else -> { // 歌曲
-                val songs = vm.indexSongs(entry, topId)
+                val songs = vm.indexSongsOf(key, topId)
                 songs.forEach { serverRows.add(ServerRow.Song(it.toMediaItem())) }
-                tvServerStatus.text = prefix + "曲目 ${songs.size} 项（点一项即可推送播放）"
+                tvServerStatus.text = prefix +
+                    "曲目 ${songs.size} 项（" + if (serverIsLocal) "点一项即本机播放）" else "点一项即可推送播放）"
             }
         }
 
@@ -1705,13 +1810,13 @@ class MainActivity : AppCompatActivity() {
      *   - 进了某专辑 / 某歌手 → 那一批
      */
     private fun serverPlayScopeSongs(): List<MediaIndexStore.IndexEntry> {
-        val entry = serverEntry ?: return emptyList()
+        val key = serverKey ?: return emptyList()
         val filter = serverFilter
         val topId = serverCategoryId
         return when {
-            serverMode == 0 && filter != null -> vm.indexSongsByAlbum(entry, filter, topId)
-            serverMode == 1 && filter != null -> vm.indexSongsByArtist(entry, filter, topId)
-            else -> vm.indexSongs(entry, topId)
+            serverMode == 0 && filter != null -> vm.indexSongsByAlbumOf(key, filter, topId)
+            serverMode == 1 && filter != null -> vm.indexSongsByArtistOf(key, filter, topId)
+            else -> vm.indexSongsOf(key, topId)
         }
     }
 
@@ -1724,10 +1829,16 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    /** 全部播放：第一首推给设备，其余进入待播列表按顺序自动连播 */
+    /** 全部播放：第一首推给设备，其余进入待播列表按顺序自动连播（本机源则本机播放） */
     private fun playAllSongs(songs: List<MediaIndexStore.IndexEntry>, label: String) {
         val items = songs.map { it.toMediaItem() }
         if (items.isEmpty()) return
+        if (items.first().resUrl.startsWith("content://")) {
+            // 手机本地音乐：本机播放第一首，其余进队列（本机模式会自动接着播）
+            vm.replaceQueueWith(items.drop(1), label, items.size)
+            playLocalAudio(items.first())
+            return
+        }
         vm.replaceQueueWith(items.drop(1), label, items.size)
         playMediaItemFromServer(items.first())
     }
@@ -1849,6 +1960,7 @@ class MainActivity : AppCompatActivity() {
         val actions = mutableListOf<String>()
         val handlers = mutableListOf<() -> Unit>()
         val kind = MediaKinds.of(item.mime, item.upnpClass, item.resUrl)
+        val isLocalFile = item.resUrl.startsWith("content://")
 
         when (kind) {
             MediaKind.IMAGE -> {
@@ -1856,16 +1968,24 @@ class MainActivity : AppCompatActivity() {
                 handlers += { openImagePreview(item.resUrl, item.title) }
             }
             MediaKind.VIDEO -> {
-                actions += "▶ 推送到设备播放"
-                handlers += { playMediaItemFromServer(item) }
+                if (!isLocalFile) {
+                    actions += "▶ 推送到设备播放"
+                    handlers += { playMediaItemFromServer(item) }
+                }
                 actions += "🎬 用手机上的播放器打开（VLC 等）"
                 handlers += { openWithSystemPlayer(item) }
             }
             else -> {
-                actions += "▶ 推送到设备播放"
-                handlers += { playMediaItemFromServer(item) }
-                actions += "📱 本机播放（用手机播）"
-                handlers += { playLocalAudio(item) }
+                if (isLocalFile) {
+                    // 手机里的音频：设备拿不到 content://，只能本机播
+                    actions += "📱 本机播放（用手机播）"
+                    handlers += { playLocalAudio(item) }
+                } else {
+                    actions += "▶ 推送到设备播放"
+                    handlers += { playMediaItemFromServer(item) }
+                    actions += "📱 本机播放（用手机播）"
+                    handlers += { playLocalAudio(item) }
+                }
             }
         }
         actions += "⏭ 下一首播放（插队）"
@@ -1929,12 +2049,16 @@ class MainActivity : AppCompatActivity() {
 
     /**
      * 列表行点击路由：
-     *   图片 → 本地预览；视频 → 交给系统播放器（VLC 等）；音乐 → 推送到设备
+     *   手机本地(content://) 音频 → 本机播放；视频 → 系统播放器；图片 → 本地预览
+     *   服务器(网络) 条目：图片 → 预览；视频 → 系统播放器；音乐 → 推送到设备
      */
     private fun handleItemTap(item: MediaItem) {
-        when (MediaKinds.of(item.mime, item.upnpClass, item.resUrl)) {
-            MediaKind.IMAGE -> openImagePreview(item.resUrl, item.title)
-            MediaKind.VIDEO -> openWithSystemPlayer(item)
+        val kind = MediaKinds.of(item.mime, item.upnpClass, item.resUrl)
+        val isLocalFile = item.resUrl.startsWith("content://")
+        when {
+            kind == MediaKind.IMAGE -> openImagePreview(item.resUrl, item.title)
+            kind == MediaKind.VIDEO -> openWithSystemPlayer(item)
+            isLocalFile -> playLocalAudio(item) // 手机里的音频只能本机播（设备拿不到 content://）
             else -> playMediaItemFromServer(item)
         }
     }
@@ -2074,6 +2198,29 @@ class MainActivity : AppCompatActivity() {
                         miniArt.visibility = View.GONE
                         imgGlow.visibility = View.GONE
                     }
+                }
+            }
+        }
+    }
+
+    /** 手机本地音频的内嵌封面：与网络封面走同一组 ImageView，但不经过 HTTP 下载。 */
+    private fun loadEmbeddedArtwork(bytes: ByteArray) {
+        val key = "embedded:${bytes.contentHashCode()}:${bytes.size}"
+        if (key == lastArtUrl) return
+        lastArtUrl = key
+        imgNowArt.visibility = View.GONE
+        miniArt.visibility = View.GONE
+        imgGlow.visibility = View.GONE
+        fetchExecutor.execute {
+            val bitmap = decodeScaled(bytes, ART_TARGET_PX)
+            mainHandler.post {
+                if (vm.uiState.value.nowPlayingArtBytes?.contentEquals(bytes) == true && bitmap != null) {
+                    imgNowArt.setImageBitmap(bitmap)
+                    imgNowArt.visibility = View.VISIBLE
+                    miniArt.setImageBitmap(bitmap)
+                    miniArt.visibility = View.VISIBLE
+                    imgGlow.setImageBitmap(bitmap)
+                    imgGlow.visibility = View.VISIBLE
                 }
             }
         }

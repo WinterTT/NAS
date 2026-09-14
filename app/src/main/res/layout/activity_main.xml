@@ -94,6 +94,24 @@
                 android:textColor="@color/text_faint"
                 android:textSize="12sp" />
 
+            <!-- 手机本地音乐入口（MediaStore 索引，复用同一套分类浏览） -->
+            <TextView
+                android:id="@+id/btnLocalMusicEntry"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginHorizontal="12dp"
+                android:layout_marginTop="10dp"
+                android:background="@drawable/bg_row_card"
+                android:drawableStart="@drawable/ic_tab_playing"
+                android:drawablePadding="6dp"
+                android:drawableTint="@color/text_secondary"
+                android:gravity="center_vertical"
+                android:paddingHorizontal="12dp"
+                android:paddingVertical="10dp"
+                android:text="手机本地音乐"
+                android:textColor="@color/text_primary"
+                android:textSize="13sp" />
+
             <!-- 搜索入口（第 8 课：本地索引 + 服务器搜索） -->
             <TextView
                 android:id="@+id/btnSearchEntry"
@@ -421,24 +439,43 @@
                         android:layout_weight="1" />
                 </LinearLayout>
 
-                <!-- 次级行：队列 / 停止 -->
+                <!-- 次级行：播放方式 / 队列 / 停止（信息与操作在同一水平线） -->
                 <LinearLayout
-                    android:layout_width="wrap_content"
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="8dp"
                     android:gravity="center_vertical"
                     android:orientation="horizontal">
 
+                    <androidx.appcompat.widget.AppCompatButton
+                        android:id="@+id/btnNowMode"
+                        android:layout_width="wrap_content"
+                        android:layout_height="36dp"
+                        android:background="@drawable/bg_pill_player"
+                        android:minWidth="0dp"
+                        android:paddingHorizontal="12dp"
+                        android:stateListAnimator="@null"
+                        android:text="顺序播放"
+                        android:textAllCaps="false"
+                        android:textColor="@color/player_text"
+                        android:textSize="12sp" />
+
                     <TextView
                         android:id="@+id/tvNowQueue"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:background="@drawable/bg_pill_ghost"
-                        android:paddingHorizontal="16dp"
-                        android:paddingVertical="6dp"
+                        android:layout_marginStart="8dp"
+                        android:background="@drawable/bg_pill_player"
+                        android:paddingHorizontal="12dp"
+                        android:paddingVertical="8dp"
                         android:text="队列(0)"
                         android:textColor="@color/player_text"
-                        android:textSize="13sp" />
+                        android:textSize="12sp" />
+
+                    <Space
+                        android:layout_width="0dp"
+                        android:layout_height="1dp"
+                        android:layout_weight="1" />
 
                     <ImageButton
                         android:id="@+id/btnNowStop"

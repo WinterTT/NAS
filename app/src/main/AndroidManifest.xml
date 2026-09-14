@@ -9,6 +9,11 @@
             需要 MulticastLock 才能收到 SSDP 组播包
          4. NEARBY_WIFI_DEVICES(Android 13+)：局域网设备发现类权限，带 neverForLocation -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- 本机音乐索引：只读系统媒体库中的音频，不申请全盘文件访问 -->
+    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
+    <uses-permission
+        android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <uses-permission

@@ -142,6 +142,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     /** 本地媒体索引（SQLite） */
     val indexStore = MediaIndexStore(getApplication())
 
+    /** 手机系统媒体库索引器（MediaStore，不直接遍历文件系统） */
+    private val localMusicIndexer = LocalMusicIndexer(getApplication(), indexStore)
+    private var localMusicIndexing = false
+
     /** 曲库索引器（后台 BFS 扫描，可停止/续扫） */
     val indexer = LibraryIndexer(
         store = indexStore,
@@ -190,6 +194,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     /** 本地索引搜索（同步，几毫秒级；调用方在主线程即可） */
     fun searchIndex(keyword: String): List<MediaIndexStore.IndexEntry> = indexStore.search(keyword)
 
+    fun localMusicCount(): Int = indexStore.countForServer(LocalMusicIndexer.SOURCE_KEY)
+
+    /** Activity 完成媒体读取授权后调用；查询和写库均在 VM 的后台线程。 */
+    fun startLocalMusicIndex(onDone: (count: Int, error: String?) -> Unit) {
+        if (localMusicIndexing) {
+            postMessage("正在建立本机音乐索引，请稍候")
+            return
+        }
+        localMusicIndexing = true
+        fetchExecutor.execute {
+            val result = runCatching { localMusicIndexer.rebuild() }
+            mainHandler.post {
+                localMusicIndexing = false
+                onDone(result.getOrDefault(0), result.exceptionOrNull()?.message)
+            }
+        }
+    }
+
     // ---- 分类浏览（专辑 / 歌手 / 歌曲）：索引过的服务器走这套 ----
 
     /**
@@ -223,6 +245,27 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun indexSongsByArtist(entry: Entry, artist: String, topId: String? = null) =
         indexStore.songsByArtist(serverIndexKeyOf(entry), artist, topId)
+
+    // ---- 按"索引键"查询：让同一套分类浏览页也能驱动手机本地媒体源 ----
+
+    fun indexCategoriesOf(key: String) = indexStore.categories(key)
+
+    fun indexAlbumsOf(key: String, topId: String? = null) = indexStore.albums(key, topId)
+
+    fun indexArtistsOf(key: String, topId: String? = null) = indexStore.artists(key, topId)
+
+    fun indexSongsOf(key: String, topId: String? = null) = indexStore.songs(key, topId)
+
+    fun indexSongsByAlbumOf(key: String, album: String, topId: String? = null) =
+        indexStore.songsByAlbum(key, album, topId)
+
+    fun indexSongsByArtistOf(key: String, artist: String, topId: String? = null) =
+        indexStore.songsByArtist(key, artist, topId)
+
+    fun indexSongCountOf(key: String): Int = indexStore.countForServer(key)
+
+    /** 手机本地媒体源（MediaStore）的索引键 */
+    fun localMediaKey(): String = LocalMusicIndexer.SOURCE_KEY
 
     /** 批量入队（整张专辑 / 某歌手全部）；只弹一条提示，不刷屏 */
     fun queueEnqueueAll(items: List<MediaItem>, label: String) {
@@ -312,6 +355,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val queuePrefs =
         getApplication<Application>().getSharedPreferences("play_queue", Context.MODE_PRIVATE)
     private var queueRestored = false
+    private var playbackMode = PlaybackMode.SEQUENTIAL
 
     /** 当前队列所属网络（换网络时切换到对应那份队列） */
     private var queueNet: String? = null
@@ -485,6 +529,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     init {
         localPlayer = LocalPlayer(
             mainHandler = mainHandler,
+            fetchExecutor = fetchExecutor,
             listener = object : LocalPlayer.Listener {
                 override fun onLocalStateChanged() {
                     syncNowPlayingState()
@@ -498,6 +543,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 override fun onLocalError(message: String) {
                     postMessage(message, isError = true)
                     localPlayer.stop()
+                    syncNowPlayingState()
+                }
+
+                override fun onLocalArtworkChanged() {
                     syncNowPlayingState()
                 }
             }
@@ -765,6 +814,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val nowPlayingArtist: String = "",
         val nowPlayingAlbum: String = "",
         val nowPlayingArtUrl: String = "",
+        /** 手机本地文件标签里的封面；远程曲目继续使用 nowPlayingArtUrl 下载。 */
+        val nowPlayingArtBytes: ByteArray? = null,
         val nowPlayingPlaying: Boolean = false,
         val nowPlayingHasRc: Boolean = false,
         val positionSec: Long = 0L,
@@ -782,6 +833,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val historyCount: Int = 0,
         /** 当前 this 会话是不是"本机播放"（手机自己播，不是推给设备） */
         val nowPlayingIsLocal: Boolean = false,
+        /** 当前队列播放方式（顺序 / 循环 / 单曲循环 / 随机） */
+        val playbackMode: PlaybackMode = PlaybackMode.SEQUENTIAL,
     )
 
     private val _uiState = MutableStateFlow(UiState())
@@ -915,6 +968,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     nowPlayingArtist = local.artist,
                     nowPlayingAlbum = local.album,
                     nowPlayingArtUrl = local.artUrl,
+                    nowPlayingArtBytes = localPlayer.artworkBytes,
                     nowPlayingPlaying = localPlayer.isPlaying(),
                     nowPlayingHasRc = true,
                     positionSec = pos,
@@ -937,6 +991,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 nowPlayingArtist = np?.artist.orEmpty(),
                 nowPlayingAlbum = np?.album.orEmpty(),
                 nowPlayingArtUrl = np?.artUrl.orEmpty(),
+                nowPlayingArtBytes = null,
                 nowPlayingPlaying = np?.playing == true,
                 nowPlayingHasRc = np?.rc != null,
                 positionSec = np?.positionSec ?: 0L,
@@ -946,6 +1001,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 queuePendingCount = playbackQueue.pendingCount,
                 queueCurrentTitle = playbackQueue.current?.title.orEmpty(),
                 queueHasItems = playbackQueue.hasActivity,
+                playbackMode = playbackMode,
             )
         }
         // 有会话就记忆"上次在播什么"（重启后恢复用）；本机播放不写记忆（重启后不可续）
@@ -1000,9 +1056,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 queuePendingCount = playbackQueue.pendingCount,
                 queueCurrentTitle = playbackQueue.current?.title.orEmpty(),
                 queueHasItems = playbackQueue.hasActivity,
+                playbackMode = playbackMode,
             )
         }
         persistQueue()
+    }
+
+    /** 循环切换播放方式；模式按网络记住，不影响其它网络的偏好。 */
+    fun cyclePlaybackMode() {
+        playbackMode = playbackMode.next()
+        queuePrefs.edit().putString(playbackModeKey(queueNet), playbackMode.name).apply()
+        syncQueueUi()
+        postMessage("播放模式：${playbackMode.label}")
     }
 
     // ------------------------------------------------------------------
@@ -1014,6 +1079,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (queueRestored) return
         queueRestored = true
         queueNet = currentNetKey()
+        playbackMode = readPlaybackMode(queueNet)
         val items = runCatching { readPendingFromPrefs(queueNet) }.getOrDefault(emptyList())
         if (items.isNotEmpty()) {
             playbackQueue.restorePending(items)
@@ -1027,6 +1093,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (newNet == queueNet) return
         Log.i(TAG, "[NET] 网络作用域切换 ${NetworkScope.labelOf(queueNet)} → ${NetworkScope.labelOf(newNet)}")
         queueNet = newNet
+        playbackMode = readPlaybackMode(newNet)
         // 旧网络的待播清单已经持久化过了；换成新网络的清单
         playbackQueue.clear()
         val restored = runCatching { readPendingFromPrefs(newNet) }.getOrDefault(emptyList())
@@ -1119,6 +1186,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun queueKey(net: String?): String = "$KEY_QUEUE_PREFIX${net ?: "unknown"}"
+
+    private fun playbackModeKey(net: String?): String =
+        "${KEY_PLAYBACK_MODE_PREFIX}${net ?: "unknown"}"
+
+    private fun readPlaybackMode(net: String?): PlaybackMode {
+        val saved = queuePrefs.getString(playbackModeKey(net), null) ?: return PlaybackMode.SEQUENTIAL
+        return PlaybackMode.entries.firstOrNull { it.name == saved } ?: PlaybackMode.SEQUENTIAL
+    }
 
     // ------------------------------------------------------------------
     // "记忆上次播放"：持久化上次会话，重启/重扫后自动恢复控制条
@@ -1228,19 +1303,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     /** 控制条"下一首"：跳过当前，直接播排队的第一首（本机模式则本机播） */
     fun queueNextItem() {
-        val item = playbackQueue.nextUp
+        val item = playbackQueue.nextUp(playbackMode, automatic = false)
         if (item == null) {
             postMessage("没有下一首了（队列已播完）")
             return
         }
         if (localPlayer.isActive) {
-            playbackQueue.commitNext(item)
+            playbackQueue.commitNext(item, playbackMode, automatic = false)
             syncQueueUi()
             startLocalPlayback(item)
             return
         }
         pushQueueItem(item) {
-            playbackQueue.commitNext(item)
+            playbackQueue.commitNext(item, playbackMode, automatic = false)
             syncQueueUi()
         }
     }
@@ -1294,19 +1369,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     /** 一首自然播完 -> 自动连播队首（本机模式继续用手机播） */
     private fun autoAdvanceQueue() {
-        val item = playbackQueue.nextUp
+        val item = playbackQueue.nextUp(playbackMode, automatic = true)
         if (item == null) {
             if (playbackQueue.hasActivity) postMessage("队列已播完")
             return
         }
         if (localPlayer.isActive) {
-            playbackQueue.commitNext(item)
+            playbackQueue.commitNext(item, playbackMode, automatic = true)
             syncQueueUi()
             startLocalPlayback(item)
             return
         }
         pushQueueItem(item) {
-            playbackQueue.commitNext(item)
+            playbackQueue.commitNext(item, playbackMode, automatic = true)
             syncQueueUi()
         }
     }
@@ -1382,7 +1457,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     /** 当前在线服务器（用于过滤搜索结果：不在本网络的服务器条目就不展示） */
     fun presentServerKeys(): Set<String> =
-        registry.all().filter { it.device != null }.map { serverIndexKeyOf(it) }.toSet()
+        registry.all().filter { it.device != null }.map { serverIndexKeyOf(it) }.toSet() +
+            LocalMusicIndexer.SOURCE_KEY
 
     // ------------------------------------------------------------------
     // 第 7 课 B：本地文件推送（手机起 HTTP 服务供渲染器拉流）
@@ -1583,6 +1659,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         // 队列持久化（按网络分 key：pending_net:192.168.1）
         private const val KEY_QUEUE_PREFIX = "pending_"
+        private const val KEY_PLAYBACK_MODE_PREFIX = "mode_"
 
         // 应用状态：用户是否处于"扫描中"（回前台自动续扫）
         private const val KEY_SCAN_WANTED = "scan_wanted"
