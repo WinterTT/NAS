@@ -18,3 +18,12 @@ local.properties
 .android-home
 __pycache__/
 *.pyc
+
+# 发布签名材料绝不能提交到仓库。
+*.jks
+*.keystore
+*.p12
+*.pfx
+keystore.properties
+key.properties
+signing.properties

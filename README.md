@@ -16,6 +16,7 @@
 | `docs/01~06` | UPnP 协议学习笔记：SSDP / SCPD+SOAP / GENA / DLNA 播放 / 曲库浏览 / 手写设备端 |
 | `docs/07-代码架构.md` | 分层、线程模型、文件职责、扩展指南、收费口子、已知问题 |
 | `docs/08-换电脑继续开发.md` | 换机清单：代码搬迁、JDK/SDK/Gradle、构建命令、数据位置 |
+| [`docs/09-Release发布.md`](docs/09-Release发布.md) | Release 签名、AAB 构建、验证与 Google Play 内部测试 |
 
 ## 构建
 
