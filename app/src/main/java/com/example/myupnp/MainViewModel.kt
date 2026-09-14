@@ -364,7 +364,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     // 播放进度 ticker：常驻轻量循环，播放中每秒推进一次本地进度
     // ------------------------------------------------------------------
 
-    init {
+    /**
+     * 仅在 Activity 的 UI 与 ViewModel 全部属性就绪后启动。
+     * 不能在构造期启动协程：协程可能在后续 lateinit 属性（如 localPlayer）赋值前抢先执行。
+     */
+    private var playbackLoopsStarted = false
+
+    fun startPlaybackLoopsOnce() {
+        if (playbackLoopsStarted) return
+        playbackLoopsStarted = true
         viewModelScope.launch {
             while (isActive) {
                 nowSession.tick(1_000L)   // 仅在 playing 时真正推进并回调
@@ -381,9 +389,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 pollSessionFallback(step)
             }
         }
-        // 注意：设备快照恢复不能放在 init 里 —— _deviceRows/_uiState 在这之后才初始化，
-        // 恢复会触发 registry 回调 -> rebuildDeviceRows -> 空指针。改由 Activity 显式调用
-        // restoreCachedDevicesOnce()（见 MainActivity.onCreate）。
     }
 
     private var cacheRestored = false

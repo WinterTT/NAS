@@ -612,6 +612,7 @@ class MainActivity : AppCompatActivity() {
         }
         refreshLibraryRows() // 提前准备好媒体服务器列表
         showPage(pageLibrary)
+        vm.startPlaybackLoopsOnce() // VM 属性与 UI 状态均已就绪后，再启动常驻播放循环
         vm.prepareRestoredQueue() // 恢复上次没播完的"待播列表"（按当前网络）
         vm.restoreCachedDevicesOnce() // 恢复设备快照：列表立即有内容，随后自动续扫刷新
         refreshLibraryRows()

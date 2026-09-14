@@ -2,23 +2,29 @@ package com.example.myupnp
 
 import android.content.Context
 import android.media.AudioManager
-import android.media.MediaPlayer
 import android.net.Uri
 import android.os.Handler
 import android.util.Log
+import androidx.media3.common.AudioAttributes
+import androidx.media3.common.C
+import androidx.media3.common.MediaItem as Media3Item
+import androidx.media3.common.PlaybackException
+import androidx.media3.common.Player
+import androidx.media3.exoplayer.ExoPlayer
 import com.example.myupnp.model.MediaItem
 
 /**
  * 本机音乐播放器（第 13 课：本机播放只处理音频，复用 App 的播放页）
  * ------------------------------------------------------------------
- * 用系统 MediaPlayer 播音频（http 或 content://）；视频交给系统播放器 App。
+ * 用 AndroidX Media3 ExoPlayer 播音频（http 或 content://）；视频交给系统播放器 App。
  * 状态通过 [Listener] 回到主线程，由 ViewModel 合成到 UiState，
  * 于是**同一个播放页/控制条**既能控制 DLNA 设备，也能控制本机播放。
  *
  * 细节：
  *   - URL 会做百分号编码（DLNA 服务器常返回带空格/中文的未转义地址）
  *   - 音量作用于手机媒体音量（AudioManager.STREAM_MUSIC）
- *   - 失败时给出可读原因（HTTP/解码器错误码）
+ *   - ExoPlayer 统一处理播放列表、缓冲与音频焦点；视频交系统播放器，避免扩大 UI 范围
+ *   - 失败时给出可读原因（网络/容器/解码器错误码）
  */
 class LocalPlayer(
     private val mainHandler: Handler,
@@ -36,8 +42,31 @@ class LocalPlayer(
         fun onLocalError(message: String)
     }
 
-    private var player: MediaPlayer? = null
+    private var player: ExoPlayer? = null
     private var appContext: Context? = null
+
+    private val playerListener = object : Player.Listener {
+        override fun onPlaybackStateChanged(playbackState: Int) {
+            when (playbackState) {
+                Player.STATE_READY -> listener.onLocalStateChanged()
+                Player.STATE_ENDED -> {
+                    val item = current ?: return
+                    Log.i(TAG, "[LOCAL] 播放完成: ${item.title}")
+                    listener.onLocalCompleted()
+                }
+            }
+        }
+
+        override fun onIsPlayingChanged(isPlaying: Boolean) {
+            listener.onLocalStateChanged()
+        }
+
+        override fun onPlayerError(error: PlaybackException) {
+            val reason = decodeError(error)
+            Log.w(TAG, "[LOCAL!] 播放失败 code=${error.errorCodeName}: ${error.message}", error)
+            listener.onLocalError("本机播放失败：$reason")
+        }
+    }
 
     /** 当前本机播放的曲目（null = 未在本机播放） */
     var current: MediaItem? = null
@@ -49,32 +78,20 @@ class LocalPlayer(
         appContext = context.applicationContext
         stopInternal()
         current = item
-        val mp = MediaPlayer()
-        player = mp
-        mp.setOnPreparedListener {
-            Log.i(TAG, "[LOCAL] 准备完成，开始播放: ${item.title}")
-            it.start()
-            listener.onLocalStateChanged()
-        }
-        mp.setOnCompletionListener {
-            Log.i(TAG, "[LOCAL] 播放完成: ${item.title}")
-            listener.onLocalCompleted()
-        }
-        mp.setOnErrorListener { _, what, extra ->
-            val reason = decodeError(what, extra)
-            Log.w(TAG, "[LOCAL!] 播放失败 what=$what extra=$extra ($reason)")
-            listener.onLocalError("本机播放失败：$reason")
-            true
-        }
         try {
-            mp.setAudioStreamType(AudioManager.STREAM_MUSIC)
             val url = item.resUrl
-            if (url.startsWith("content://")) {
-                mp.setDataSource(context, Uri.parse(url))
-            } else {
-                mp.setDataSource(encodeUrl(url))
+            val uri = Uri.parse(if (url.startsWith("content://")) url else encodeUrl(url))
+            val audioAttributes = AudioAttributes.Builder()
+                .setUsage(C.USAGE_MEDIA)
+                .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
+                .build()
+            player = ExoPlayer.Builder(context.applicationContext).build().apply {
+                setAudioAttributes(audioAttributes, true)
+                addListener(playerListener)
+                setMediaItem(Media3Item.fromUri(uri))
+                prepare()
+                play()
             }
-            mp.prepareAsync()
             listener.onLocalStateChanged()
         } catch (e: Exception) {
             Log.w(TAG, "[LOCAL!] 无法开始播放: ${e.message}")
@@ -83,13 +100,11 @@ class LocalPlayer(
         }
     }
 
-    fun isPlaying(): Boolean = runCatching { player?.isPlaying == true }.getOrDefault(false)
+    fun isPlaying(): Boolean = player?.isPlaying == true
 
     fun toggle() {
-        val mp = player ?: return
-        runCatching {
-            if (mp.isPlaying) mp.pause() else mp.start()
-        }
+        val exoPlayer = player ?: return
+        if (exoPlayer.isPlaying) exoPlayer.pause() else exoPlayer.play()
         listener.onLocalStateChanged()
     }
 
@@ -102,13 +117,13 @@ class LocalPlayer(
     }
 
     fun positionSec(): Long =
-        runCatching { (player?.currentPosition ?: 0) / 1000L }.getOrDefault(0L)
+        player?.currentPosition?.takeIf { it >= 0 }?.div(1000L) ?: 0L
 
     fun durationSec(): Long =
-        runCatching { (player?.duration ?: 0) / 1000L }.getOrDefault(0L)
+        player?.duration?.takeIf { it != C.TIME_UNSET && it >= 0 }?.div(1000L) ?: 0L
 
     fun seekTo(sec: Long) {
-        runCatching { player?.seekTo((sec * 1000L).toInt()) }
+        player?.seekTo(sec.coerceAtLeast(0) * 1000L)
         listener.onLocalStateChanged()
     }
 
@@ -136,23 +151,23 @@ class LocalPlayer(
     }
 
     private fun stopInternal() {
-        runCatching {
-            player?.setOnPreparedListener(null)
-            player?.setOnCompletionListener(null)
-            player?.setOnErrorListener(null)
-            if (player?.isPlaying == true) player?.stop()
-            player?.reset()
-            player?.release()
-        }
+        player?.removeListener(playerListener)
+        player?.release()
         player = null
     }
 
-    /** MediaPlayer 错误码 → 人话 */
-    private fun decodeError(what: Int, extra: Int): String = when {
-        what == MediaPlayer.MEDIA_ERROR_UNSUPPORTED -> "手机不支持这个音频格式/编码（extra=$extra）"
-        what == MediaPlayer.MEDIA_ERROR_TIMED_OUT -> "连接或读取超时（地址不可达/服务器太慢）"
-        what == MediaPlayer.MEDIA_ERROR_IO -> "读取失败：地址不可达或服务器拒绝（extra=$extra）"
-        else -> "解码/网络错误（what=$what extra=$extra）"
+    /** Media3 错误码 → 人话 */
+    private fun decodeError(error: PlaybackException): String = when (error.errorCode) {
+        PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED,
+        PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT -> "连接或读取超时（地址不可达/服务器太慢）"
+        PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS,
+        PlaybackException.ERROR_CODE_IO_FILE_NOT_FOUND,
+        PlaybackException.ERROR_CODE_IO_NO_PERMISSION -> "读取失败：地址不可达或服务器拒绝"
+        PlaybackException.ERROR_CODE_PARSING_CONTAINER_MALFORMED,
+        PlaybackException.ERROR_CODE_PARSING_MANIFEST_MALFORMED,
+        PlaybackException.ERROR_CODE_DECODING_FAILED,
+        PlaybackException.ERROR_CODE_DECODING_FORMAT_UNSUPPORTED -> "手机不支持这个音频格式/编码"
+        else -> "解码或网络错误（${error.errorCodeName}）"
     }
 
     /**
