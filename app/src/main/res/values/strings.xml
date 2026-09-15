@@ -65,4 +65,5 @@
     <string name="version_unknown">未知</string>
     <string name="about_message">HavenCast\n\n版本：%1$s（%2$d）\n包名：%3$s\n\nHavenCast 是一款家庭局域网媒体遥控器，可发现、浏览并控制 DLNA/UPnP 媒体设备。</string>
     <string name="open_source_dependencies">以下为 HavenCast Release 直接依赖的第三方组件（均采用 Apache License 2.0）：\n\n• AndroidX Core KTX 1.10.1\n• AndroidX Activity KTX 1.8.0\n• AndroidX AppCompat 1.6.1\n• AndroidX ConstraintLayout 2.1.4\n• AndroidX Lifecycle ViewModel KTX 2.8.7\n• AndroidX Lifecycle Runtime KTX 2.8.7\n• AndroidX Media3 ExoPlayer 1.11.0\n• Material Components for Android 1.10.0\n• Kotlinx Coroutines Android 1.8.1\n\n以下是 Apache License 2.0 全文：</string>
+    <string name="banner_ad_close">关闭本次广告</string>
 </resources>

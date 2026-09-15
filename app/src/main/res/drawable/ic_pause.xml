@@ -1,11 +1,4 @@
 <?xml version="1.0" encoding="utf-8"?>
-<vector xmlns:android="http://schemas.android.com/apk/res/android"
-    android:width="24dp"
-    android:height="24dp"
-    android:viewportWidth="24"
-    android:viewportHeight="24">
-    <!-- 暂停：与播放三角等高的两条圆润竖杠 -->
-    <path
-        android:fillColor="#FF000000"
-        android:pathData="M7,5h3v14H7zM14,5h3v14h-3z" />
+<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="64dp" android:height="64dp" android:viewportWidth="64" android:viewportHeight="64">
+    <path android:fillColor="#FFFFFFFF" android:pathData="M32,0C49.6731,0 64,14.3269 64,32C64,49.6731 49.6731,64 32,64C14.3269,64 0,49.6731 0,32C0,14.3269 14.3269,0 32,0ZM25,21C23.3431,21 22,22.3431 22,24V41C22,42.6569 23.3431,44 25,44C26.6569,44 28,42.6569 28,41V24C28,22.3431 26.6569,21 25,21ZM39,21C37.3431,21 36,22.3431 36,24V41C36,42.6569 37.3431,44 39,44C40.6569,44 42,42.6569 42,41V24C42,22.3431 40.6569,21 39,21Z" />
 </vector>

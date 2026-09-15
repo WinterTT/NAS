@@ -1,11 +1,4 @@
 <?xml version="1.0" encoding="utf-8"?>
-<vector xmlns:android="http://schemas.android.com/apk/res/android"
-    android:width="24dp"
-    android:height="24dp"
-    android:viewportWidth="24"
-    android:viewportHeight="24">
-    <!-- 下一首：右指示三角与右侧停靠线 -->
-    <path
-        android:fillColor="#FF000000"
-        android:pathData="M5,5l10,7L5,19z M17,5h2v14h-2z" />
+<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="26dp" android:height="26dp" android:viewportWidth="26" android:viewportHeight="26">
+    <path android:fillColor="#FFFFFFFF" android:pathData="M4.135,24.1429C3.39,24.1429 2.7864,23.5148 2.7864,22.7405L2.7864,3.2591C2.7865,3.0308 2.84,2.8056 2.9427,2.6038C3.291,1.9196 4.1074,1.658 4.7659,2.0198L20.429,10.6263L20.429,3.7142C20.4291,2.6886 21.2608,1.8568 22.2864,1.8568C23.3118,1.857 24.1428,2.6887 24.1429,3.7142L24.1429,22.2855C24.1429,23.311 23.3119,24.1427 22.2864,24.1429C21.2607,24.1429 20.429,23.3111 20.429,22.2855V15.3753L4.7659,23.9808C4.5716,24.0875 4.3548,24.1429 4.135,24.1429Z" />
 </vector>

@@ -34,16 +34,18 @@ import java.lang.ref.WeakReference
  */
 class AdsManager(private val app: Application) {
 
-    enum class State { IDLE, CONSENT, LOADING, READY, FAILED, DISABLED }
+    enum class State { IDLE, CONSENT, LOADING, READY, FAILED, DISABLED, DISMISSED }
 
     private var consentInformation: ConsentInformation? = null
     private var sdkInitialized = false
     private var initializing = false
     private var canRequestAds = false
     private var adView: AdView? = null
+    private var dismissedForSession = false
 
     /** 容器与宿主 Activity 都用弱引用：别让广告把已销毁的页面拖住 */
     private var containerRef: WeakReference<FrameLayout>? = null
+    private var hostRef: WeakReference<View>? = null
     private var activityRef: WeakReference<Activity>? = null
 
     private var state: State = State.IDLE
@@ -125,36 +127,53 @@ class AdsManager(private val app: Application) {
     // ------------------------------------------------------------------
 
     /** 把横幅挂到容器里；容器为 null 容器不可用或已免广告时不显示 */
-    fun attachBanner(activity: Activity, container: FrameLayout) {
+    fun attachBanner(activity: Activity, container: FrameLayout, host: View) {
         activityRef = WeakReference(activity)
         containerRef = WeakReference(container)
+        hostRef = WeakReference(host)
         // 等一帧拿到容器真实宽度（自适应横幅按宽度算高度）
         container.post { refresh() }
     }
 
+    /** 用户关闭后，本次 App 会话不再请求或重新展示横幅；不改变免广告资格。 */
+    fun dismissBanner() {
+        dismissedForSession = true
+        state = State.DISMISSED
+        destroyBanner()
+        hostRef?.get()?.visibility = View.GONE
+    }
+
     private fun refresh() {
         val container = containerRef?.get()
+        val host = hostRef?.get()
         val activity = activityRef?.get() ?: return
-        if (container == null) return
+        if (container == null || host == null) return
+
+        if (dismissedForSession) {
+            host.visibility = View.GONE
+            return
+        }
 
         if (!enabled) {
             state = State.DISABLED
             destroyBanner()
-            container.visibility = View.GONE
+            host.visibility = View.GONE
             return
         }
         if (!canRequestAds || !sdkInitialized) {
             // 同意流程/SDK 还没就绪：先藏着，就绪后 startSdk() 会再调回来
-            container.visibility = View.GONE
+            host.visibility = View.GONE
             return
         }
         if (adView != null) {
-            container.visibility = View.VISIBLE
+            host.visibility = if (state == State.READY) View.VISIBLE else View.GONE
             return
         }
 
         val metrics = activity.resources.displayMetrics
-        val widthPx = if (container.width > 0) container.width else metrics.widthPixels
+        // 初始 GONE 时容器尚未测量，按右侧 X 的 48dp 与 8dp 间隔预留宽度。
+        val closeAreaPx = (56 * metrics.density).toInt()
+        val widthPx = if (container.width > 0) container.width else metrics.widthPixels - closeAreaPx
         val widthDp = (widthPx / metrics.density).toInt()
         // 锚定式自适应横幅（紧贴页面底部，正是我们的位置）。
         // 该 API 已被官方标记 deprecated（转向 inline adaptive），但 25.4.0 实测仍正常出广告；
@@ -166,18 +185,20 @@ class AdsManager(private val app: Application) {
         val view = AdView(activity).apply {
             adUnitId = activity.getString(R.string.admob_banner_unit_id)
             setAdSize(adSize)
-            adListener = object : AdListener() {
-                override fun onAdLoaded() {
-                    state = State.READY
-                    container.visibility = View.VISIBLE
-                }
+        }
+        view.adListener = object : AdListener() {
+            override fun onAdLoaded() {
+                if (dismissedForSession || adView !== view) return
+                state = State.READY
+                host.visibility = View.VISIBLE
+            }
 
-                override fun onAdFailedToLoad(error: LoadAdError) {
-                    // 拉不到就彻底收起，不留空白；下次进入页面会重新尝试
-                    state = State.FAILED
-                    Log.w(TAG, "[AD] 横幅加载失败：${error.code} ${error.message}")
-                    container.visibility = View.GONE
-                }
+            override fun onAdFailedToLoad(error: LoadAdError) {
+                if (dismissedForSession || adView !== view) return
+                // 拉不到就彻底收起，不留空白；下次进入页面会重新尝试
+                state = State.FAILED
+                Log.w(TAG, "[AD] 横幅加载失败：${error.code} ${error.message}")
+                host.visibility = View.GONE
             }
         }
         container.removeAllViews()
@@ -189,7 +210,7 @@ class AdsManager(private val app: Application) {
             )
         )
         adView = view
-        container.visibility = View.GONE // 加载成功前不占位
+        host.visibility = View.GONE // 加载成功前不占位
         view.loadAd(AdRequest.Builder().build())
     }
 
@@ -211,6 +232,7 @@ class AdsManager(private val app: Application) {
         destroyBanner()
         activityRef = null
         containerRef = null
+        hostRef = null
     }
 
     private fun destroyBanner() {

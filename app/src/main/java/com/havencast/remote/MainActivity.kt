@@ -94,6 +94,7 @@ class MainActivity : AppCompatActivity() {
 
     // ===== 广告（只在媒体库页底部一条横幅，见 ads/AdsManager） =====
     private lateinit var adBannerContainer: FrameLayout
+    private lateinit var adBannerHost: View
 
     // ===== 服务器曲库（索引后的分类浏览） =====
     private lateinit var pageServer: View
@@ -167,6 +168,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var btnNowPrev: ImageButton
     private lateinit var btnNowNext: ImageButton
     private lateinit var btnNowMode: Button
+    private var renderedPlaybackMode: PlaybackMode? = null
     private lateinit var tvNowQueue: TextView
     private lateinit var btnPushLocal: Button
     private lateinit var btnQueueQuick: Button
@@ -662,8 +664,10 @@ class MainActivity : AppCompatActivity() {
         // 广告：走 Google UMP 同意流程后初始化 SDK，再把自适应横幅挂到媒体库页底部。
         // 全程异步，任何一步失败都只是"没有广告"，不影响扫描/浏览/播放等主流程。
         adBannerContainer = findViewById(R.id.adBannerContainer)
+        adBannerHost = findViewById(R.id.adBannerHost)
+        findViewById<View>(R.id.btnCloseBannerAd).setOnClickListener { vm.ads.dismissBanner() }
         vm.ads.initialize(this)
-        vm.ads.attachBanner(this, adBannerContainer)
+        vm.ads.attachBanner(this, adBannerContainer, adBannerHost)
 
         // 首次使用引导（只弹一次）
         val onboardPrefs = getSharedPreferences("ui_onboarding", MODE_PRIVATE)
@@ -756,7 +760,18 @@ class MainActivity : AppCompatActivity() {
 
                     // 队列 / 元数据 / 封面
                     tvNowQueue.text = "队列(${s.queuePendingCount})"
-                    btnNowMode.text = s.playbackMode.label
+                    if (renderedPlaybackMode != s.playbackMode) {
+                        btnNowMode.text = s.playbackMode.label
+                        val modeIconId = when (s.playbackMode) {
+                            PlaybackMode.REPEAT_ALL, PlaybackMode.REPEAT_ONE -> R.drawable.ic_mode_repeat
+                            PlaybackMode.SHUFFLE -> R.drawable.ic_mode_shuffle
+                            PlaybackMode.SEQUENTIAL -> null
+                        }
+                        val modeIcon = modeIconId?.let { ContextCompat.getDrawable(this@MainActivity, it)?.mutate() }
+                        modeIcon?.setTint(ContextCompat.getColor(this@MainActivity, R.color.player_text))
+                        btnNowMode.setCompoundDrawablesWithIntrinsicBounds(modeIcon, null, null, null)
+                        renderedPlaybackMode = s.playbackMode
+                    }
                     tvNowMeta.text = meta
                     tvNowMeta.visibility = if (meta.isEmpty()) View.GONE else View.VISIBLE
                     if (s.nowPlayingArtBytes != null) {

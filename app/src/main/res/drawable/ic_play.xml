@@ -1,11 +1,4 @@
 <?xml version="1.0" encoding="utf-8"?>
-<vector xmlns:android="http://schemas.android.com/apk/res/android"
-    android:width="24dp"
-    android:height="24dp"
-    android:viewportWidth="24"
-    android:viewportHeight="24">
-    <!-- 播放：与上一首/下一首同一视觉重心的右指三角 -->
-    <path
-        android:fillColor="#FF000000"
-        android:pathData="M8,5.25v13.5L18.5,12z" />
+<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="64dp" android:height="64dp" android:viewportWidth="64" android:viewportHeight="64">
+    <path android:fillColor="#FFFFFFFF" android:pathData="M32,0C49.6731,0 64,14.3269 64,32C64,49.6731 49.6731,64 32,64C14.3269,64 0,49.6731 0,32C0,14.3269 14.3269,0 32,0ZM26.334,21C25.5975,21 25,21.6145 25,22.3721V41.6279C25,41.8554 25.0552,42.0792 25.1602,42.2793C25.51,42.9458 26.3188,43.1947 26.9668,42.835L44.2998,33.207C44.5285,33.08 44.7164,32.8866 44.8398,32.6514C45.1895,31.9848 44.9477,31.1529 44.2998,30.793L26.9668,21.165C26.7723,21.057 26.555,21.0001 26.334,21Z" />
 </vector>

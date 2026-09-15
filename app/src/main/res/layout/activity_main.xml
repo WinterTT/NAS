@@ -220,15 +220,34 @@
                     tools:visibility="visible" />
             </FrameLayout>
 
-            <!-- 广告位：只在媒体库页底部放一条自适应横幅（播放页永不放广告）。
-                 初始 gone，拉到广告才显示；拉不到就一直是 gone，不留空白。 -->
-            <FrameLayout
-                android:id="@+id/adBannerContainer"
+            <!-- X 与横幅同一行，位于广告右上角的独立触摸区，不遮挡广告素材。 -->
+            <LinearLayout
+                android:id="@+id/adBannerHost"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="4dp"
+                android:gravity="top"
+                android:orientation="horizontal"
                 android:visibility="gone"
-                tools:visibility="gone" />
+                tools:visibility="gone">
+
+                <FrameLayout
+                    android:id="@+id/adBannerContainer"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1" />
+
+                <ImageButton
+                    android:id="@+id/btnCloseBannerAd"
+                    android:layout_width="48dp"
+                    android:layout_height="48dp"
+                    android:layout_marginStart="8dp"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:contentDescription="@string/banner_ad_close"
+                    android:padding="12dp"
+                    android:src="@drawable/ic_close_banner"
+                    android:tint="@color/text_secondary" />
+            </LinearLayout>
         </LinearLayout>
 
         <!-- ========== 页 2：正在播放（完整页，参考主流音乐 App） ========== -->
@@ -378,7 +397,7 @@
                         android:layout_width="16dp"
                         android:layout_height="16dp"
                         android:contentDescription="@null"
-                        android:src="@drawable/ic_vol_down"
+                        android:src="@drawable/ic_player_volume"
                         android:tint="@color/player_faint" />
 
                     <SeekBar
@@ -419,9 +438,9 @@
                         android:id="@+id/btnNowPrev"
                         android:layout_width="60dp"
                         android:layout_height="60dp"
-                        android:background="@drawable/bg_circle_player_secondary"
+                        android:background="?attr/selectableItemBackgroundBorderless"
                         android:contentDescription="上一首"
-                        android:padding="16dp"
+                        android:padding="17dp"
                         android:scaleType="fitCenter"
                         android:src="@drawable/ic_prev"
                         android:tint="@color/player_text" />
@@ -431,20 +450,20 @@
                         android:layout_width="76dp"
                         android:layout_height="76dp"
                         android:layout_marginHorizontal="22dp"
-                        android:background="@drawable/bg_circle_brand"
+                        android:background="?attr/selectableItemBackgroundBorderless"
                         android:contentDescription="播放/暂停"
-                        android:padding="21dp"
+                        android:padding="6dp"
                         android:scaleType="fitCenter"
                         android:src="@drawable/ic_play"
-                        android:tint="@color/on_brand" />
+                        android:tint="@color/player_text" />
 
                     <ImageButton
                         android:id="@+id/btnNowNext"
                         android:layout_width="60dp"
                         android:layout_height="60dp"
-                        android:background="@drawable/bg_circle_player_secondary"
+                        android:background="?attr/selectableItemBackgroundBorderless"
                         android:contentDescription="下一首"
-                        android:padding="16dp"
+                        android:padding="17dp"
                         android:scaleType="fitCenter"
                         android:src="@drawable/ic_next"
                         android:tint="@color/player_text" />
@@ -468,6 +487,8 @@
                         android:layout_width="wrap_content"
                         android:layout_height="36dp"
                         android:background="@drawable/bg_pill_player"
+                        android:drawablePadding="6dp"
+                        android:drawableStart="@drawable/ic_mode_repeat"
                         android:minWidth="0dp"
                         android:paddingHorizontal="12dp"
                         android:stateListAnimator="@null"
@@ -498,12 +519,12 @@
                         android:layout_width="44dp"
                         android:layout_height="44dp"
                         android:layout_marginStart="14dp"
-                        android:background="@drawable/bg_circle_player_secondary"
+                        android:background="?attr/selectableItemBackgroundBorderless"
                         android:contentDescription="停止"
-                        android:padding="12dp"
+                        android:padding="0dp"
                         android:scaleType="fitCenter"
                         android:src="@drawable/ic_stop"
-                        android:tint="@color/player_faint" />
+                        android:tint="@color/player_text" />
                 </LinearLayout>
 
                 <Space
@@ -1063,20 +1084,20 @@
             android:id="@+id/btnMiniPlay"
             android:layout_width="44dp"
             android:layout_height="44dp"
-            android:background="@drawable/bg_circle_mini_brand"
+            android:background="?attr/selectableItemBackgroundBorderless"
             android:contentDescription="播放/暂停"
-            android:padding="11dp"
+            android:padding="0dp"
             android:scaleType="fitCenter"
             android:src="@drawable/ic_play"
-            android:tint="@color/on_brand" />
+            android:tint="@color/brand" />
 
         <ImageButton
             android:id="@+id/btnMiniNext"
             android:layout_width="44dp"
             android:layout_height="44dp"
-            android:background="@drawable/bg_circle_mini_secondary"
+            android:background="?attr/selectableItemBackgroundBorderless"
             android:contentDescription="下一首"
-            android:padding="11dp"
+            android:padding="9dp"
             android:scaleType="fitCenter"
             android:src="@drawable/ic_next"
             android:tint="@color/text_primary" />
