@@ -1,20 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  AdMob 配置（唯一的改动点）
+  AdMob 正式配置（release 包使用）
   ================================================================
-  admob_app_id         已填真实值（AdMob 后台 → 应用 → 应用设置 → 应用 ID）
-  admob_banner_unit_id 仍是 Google 官方测试广告位：
-                       测试广告位可以在任何 App ID 下正常出广告（不产生收入、也不会被判无效流量），
-                       所以"真实 App ID + 测试广告位"是官方推荐的开发期组合。
-                       ⚠️ 反过来（测试 App ID + 真实广告位）才是违规的，别那么干。
+  这里的两个值是 **真实账号数据**，只在 release 包里生效；
+  debug 包会被 src/debug/res/values/ad_config.xml 覆盖成 Google 官方测试 ID，
+  所以日常调试、真机自测永远不会碰到真实广告（避免"无效流量"风险）。
 
-  待办：在 AdMob 后台「广告」→「广告单元」→ 新建广告单元 → 选择「横幅」（建议开启自适应），
-        把拿到的 ca-app-pub-8912539911574711/XXXXXXXXXX 填到下面第二行。
-        在那之前，Release 构建会被 app/build.gradle.kts 的 checkAdMobTestIds 拦住（这是故意的）。
+    admob_app_id         AdMob 后台 → 应用 → 应用设置 → 应用 ID
+    admob_banner_unit_id AdMob 后台 → 广告 → 广告单元 → 必须是「横幅」格式的单元
+                         （把插屏/原生/激励单元填到这里会一直加载失败：
+                           AdView 只能请求横幅类广告）
 
+  改完这里不需要动代码。Release 构建会用 checkAdMobTestIds 校验本文件里
+  是否还残留 AdMob 官方测试值（校验前会剥掉注释，所以注释里写数字没关系）。
   详见 docs/11-广告接入.md。
 -->
 <resources>
     <string name="admob_app_id" translatable="false">ca-app-pub-8912539911574711~1218114790</string>
-    <string name="admob_banner_unit_id" translatable="false">ca-app-pub-3940256099942544/9214589741</string>
+    <string name="admob_banner_unit_id" translatable="false">ca-app-pub-8912539911574711/1536397739</string>
 </resources>

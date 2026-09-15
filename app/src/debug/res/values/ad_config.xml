@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  调试包（debug）专用：覆盖 src/main 下的真实 AdMob ID，全部换成 Google 官方测试 ID。
+  ================================================================================
+  为什么这么做：
+    · 开发者自己的设备反复请求/误点真实广告 = AdMob 眼里的"无效流量"，
+      轻则扣减收入，重则封号。测试 ID 永远不会产生这个问题。
+    · 测试广告位在真实 App ID 下也能正常出广告；这里连 App ID 也一并换成测试值，
+      是为了 debug 包完全不碰正式账号的数据（后台不会出现调试请求）。
+  Release 包不会被这个文件影响，用的仍是 src/main/res/values/ad_config.xml 里的真实 ID。
+-->
+<resources>
+    <string name="admob_app_id" translatable="false">ca-app-pub-3940256099942544~3347511713</string>
+    <string name="admob_banner_unit_id" translatable="false">ca-app-pub-3940256099942544/9214589741</string>
+</resources>

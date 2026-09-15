@@ -78,14 +78,16 @@ androidComponents {
  * 测试 ID 出不了广告收入，而且商店审核可能判定为无效流量。
  * 把 src/main/res/values/ad_config.xml 换成自己的 App ID / 广告位 ID 后，这个检查自然通过。
  */
-val checkAdMobTestIds by tasks.registering {
+val checkAdMobTestIds = tasks.register("checkAdMobTestIds") {
     description = "校验 Release 没有使用 AdMob 官方测试 ID"
     val adConfigFile = layout.projectDirectory.file("src/main/res/values/ad_config.xml").asFile
     inputs.file(adConfigFile)
     doLast {
-        val text = adConfigFile.readText()
+        // 先剥掉 XML 注释再匹配：注释里可以放心写测试 ID 的说明文字，不能因此误判
+        val text = adConfigFile.readText().replace(Regex("(?s)<!--.*?-->"), "")
         check(!text.contains("3940256099942544")) {
-            "ad_config.xml 里还是 AdMob 官方测试 ID，不能用于 Release。请先换成自己账号下的 App ID 与广告位 ID（见 docs/11-广告接入.md）。"
+            "ad_config.xml 里的广告 ID 还是 AdMob 官方测试值，不能用于 Release。" +
+                "请换成自己账号下的 App ID 与横幅广告位 ID（见 docs/11-广告接入.md）。"
         }
     }
 }

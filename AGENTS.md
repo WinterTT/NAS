@@ -48,6 +48,12 @@
   而且**不能**用 `Uri.parse("mailto:x@y.com").buildUpon().appendQueryParameter(...)`——
   `mailto:` 是 opaque URI，追加 query 会把地址丢掉，实测变成 `mailto:?subject=…`（收件人凭空消失）。
   正确做法是手工拼串 + `Uri.encode`，换行按 RFC 6068 用 `%0D%0A`（见 `FeedbackReporter.mailtoUri`）。
+- **别用 PowerShell 的 `Get-Content` / `Set-Content` 改含中文的文件**：默认按 ANSI 读，
+  中文会整段变乱码写回去（本仓库全中文注释，踩过）。要改文本一律用编辑工具；
+  用脚本处理时显式写 `[System.IO.File]::ReadAllText/WriteAllText` + `UTF8Encoding($false)`（不带 BOM）。
+- **广告 ID 分两套**：`src/main/.../ad_config.xml` 放真实 ID（release 用），
+  `src/debug/.../ad_config.xml` 放 Google 官方测试 ID（debug 覆盖 main）。
+  开发者自己的设备点/反复请求真实广告 = 无效流量，会掉收入甚至封号。
 - **别把 `ANDROID_USER_HOME` 指到工程内**：AGP 会改用它下面的 `debug.keystore` 签名，
   与默认 `%USERPROFILE%\.android\debug.keystore` 签出来的 APK 签名不一致 →
   `adb install -r` 报 `INSTALL_FAILED_UPDATE_INCOMPATIBLE`，只能卸载重装（会清掉索引/收藏）。
@@ -133,7 +139,8 @@ app/src/main/java/com/havencast/remote/
 - **广告（AdMob）**：仅「媒体库」页底部一条自适应横幅（播放页等一律不放，不做插屏/开屏）；
   走 Google UMP 同意流程后初始化 SDK，全程异步、失败即隐藏、不阻塞任何主流程；
   去广告开关是 `AdPolicy`（将来接 Billing / 激励视频）；
-  测试期用 Google 官方测试 ID，Release 构建有 `checkAdMobTestIds` 闸门拦住测试 ID 上架
+  广告 ID 分两套（debug 用官方测试 ID、release 用真实 ID），Release 构建有 `checkAdMobTestIds` 闸门；
+  真实 ID 已填，但**真实广告只能在 release 包上验证**（见 `docs/11-广告接入.md`）
 
 ## 6. 已知问题
 
