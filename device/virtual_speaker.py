@@ -3,7 +3,7 @@
 """
 B1: 虚拟音响 —— 一台极简 DLNA MediaRenderer（纯 Python 标准库）
 =========================================================================
-用途：在电脑上伪装成一台"网络音响"，让手机上的 MyUPNP App
+用途：在电脑上伪装成一台"网络音响"，让手机上的 HavenCast App
 （或任何 DLNA 控制点）发现它、向它推歌、调它音量、订阅它的事件。
 
 这是前几课的"镜像"：前面我们用 Kotlin 写控制点（主动问/调/订），
@@ -330,8 +330,8 @@ DESC_XML = f"""<?xml version="1.0"?>
   <specVersion><major>1</major><minor>0</minor></specVersion>
   <device>
     <deviceType>{DEVICE_TYPE}</deviceType>
-    <friendlyName>虚拟音响(MyUPNP B1)</friendlyName>
-    <manufacturer>MyUPNP</manufacturer>
+    <friendlyName>虚拟音响(HavenCast B1)</friendlyName>
+    <manufacturer>HavenCast</manufacturer>
     <modelName>Virtual Speaker</modelName>
     <UDN>uuid:{DEVICE_UUID}</UDN>
     <serviceList>

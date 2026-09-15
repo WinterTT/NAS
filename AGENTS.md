@@ -1,4 +1,4 @@
-# MyUPNP 项目上下文（交给助手/新同事看这份）
+# HavenCast 项目上下文（交给助手/新同事看这份）
 
 > 这个文件会被 AI 助手**自动加载**到每个新会话里。新电脑上 clone 工程后即可开工，
 > 不需要额外"喂上下文"。详细文档见 `docs/`。
@@ -9,7 +9,7 @@
 
 从零手写实现的 **DLNA / UPnP 控制点 Android App**（Kotlin，自研协议栈，不依赖第三方 UPnP 库），
 用于把家里的 DLNA 音箱 / 电视 / PC 媒体服务器统一成一个"遥控器 + 媒体库"。
-正式包名 `com.domocast.remote`。中文界面，面向普通用户做产品化。
+正式包名 `com.havencast.remote`。中文界面，面向普通用户做产品化。
 
 定位：**精简易用**；广告将来接入但不能打断播放；后续收费方向是"帮用户管理服务器"（建目录/清理/推荐）。
 
@@ -54,7 +54,7 @@ $env:ANDROID_USER_HOME='<工程根>\.android-home'
 .\gradlew.bat --no-daemon :app:testDebugUnitTest    # 既有单测回归（不新增）
 ```
 
-- 真机：`adb install -r app\build\outputs\apk\debug\app-debug.apk`，日志 `adb logcat -s MyUPNP`
+- 真机：`adb install -r app\build\outputs\apk\debug\app-debug.apk`，日志 `adb logcat -s HavenCast`
 - 环境要求（JDK 17/21、Android SDK platform 37、`local.properties` 的 `sdk.dir`）见 `docs/08-换电脑继续开发.md`
 
 ---
@@ -62,7 +62,7 @@ $env:ANDROID_USER_HOME='<工程根>\.android-home'
 ## 4. 代码地图（速查）
 
 ```
-app/src/main/java/com/domocast/remote/
+app/src/main/java/com/havencast/remote/
 ├── MainActivity.kt          UI 编排：三个 Tab（媒体库/播放/设置）+ 搜索页 + 服务器分类页 + 各种对话框
 ├── MainViewModel.kt         唯一编排中枢：线程池/Handler、UiState、扫描子系统、队列记账、索引进度回调
 ├── DeviceRegistry.kt        设备注册表：增删/心跳清理/描述拉取/快照恢复

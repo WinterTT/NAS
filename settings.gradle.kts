@@ -22,6 +22,6 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "My UPNP"
+rootProject.name = "HavenCast"
 include(":app")
  

@@ -6,13 +6,13 @@ plugins {
 }
 
 val releaseSigningInfo = providers
-    .environmentVariablesPrefixedBy("DOMOCAST_RELEASE_")
+    .environmentVariablesPrefixedBy("HAVENCAST_RELEASE_")
     .map { environment ->
         val required = listOf(
-            "DOMOCAST_RELEASE_STORE_FILE",
-            "DOMOCAST_RELEASE_STORE_PASSWORD",
-            "DOMOCAST_RELEASE_KEY_ALIAS",
-            "DOMOCAST_RELEASE_KEY_PASSWORD",
+            "HAVENCAST_RELEASE_STORE_FILE",
+            "HAVENCAST_RELEASE_STORE_PASSWORD",
+            "HAVENCAST_RELEASE_KEY_ALIAS",
+            "HAVENCAST_RELEASE_KEY_PASSWORD",
         )
         val missing = required.filter { environment[it].isNullOrBlank() }
         check(missing.isEmpty()) {
@@ -20,32 +20,32 @@ val releaseSigningInfo = providers
                 "See docs/09-Release publication guide."
         }
 
-        val storeFile = File(environment.getValue("DOMOCAST_RELEASE_STORE_FILE")).canonicalFile
+        val storeFile = File(environment.getValue("HAVENCAST_RELEASE_STORE_FILE")).canonicalFile
         check(storeFile.isFile) {
-            "DOMOCAST_RELEASE_STORE_FILE must point to an existing PKCS12 keystore."
+            "HAVENCAST_RELEASE_STORE_FILE must point to an existing PKCS12 keystore."
         }
         val repositoryPath = File(System.getProperty("user.dir")).canonicalFile.toPath()
         check(!storeFile.toPath().startsWith(repositoryPath)) {
-            "DOMOCAST_RELEASE_STORE_FILE must be outside the repository."
+            "HAVENCAST_RELEASE_STORE_FILE must be outside the repository."
         }
 
         SigningConfigInfo(
             storeFile,
-            environment.getValue("DOMOCAST_RELEASE_STORE_PASSWORD"),
-            environment.getValue("DOMOCAST_RELEASE_KEY_ALIAS"),
-            environment.getValue("DOMOCAST_RELEASE_KEY_PASSWORD"),
+            environment.getValue("HAVENCAST_RELEASE_STORE_PASSWORD"),
+            environment.getValue("HAVENCAST_RELEASE_KEY_ALIAS"),
+            environment.getValue("HAVENCAST_RELEASE_KEY_PASSWORD"),
             "PKCS12",
         )
     }
 
 android {
-    namespace = "com.domocast.remote"
+    namespace = "com.havencast.remote"
     compileSdk {
         version = release(37)
     }
 
     defaultConfig {
-        applicationId = "com.domocast.remote"
+        applicationId = "com.havencast.remote"
         minSdk = 24
         targetSdk = 37
         versionCode = 1

@@ -1,6 +1,6 @@
 <resources xmlns:tools="http://schemas.android.com/tools">
     <!-- 深色主题：内容与亮色一致（品牌色等按颜色资源自动取深色值） -->
-    <style name="Base.Theme.MyUPNP" parent="Theme.Material3.DayNight.NoActionBar">
+    <style name="Base.Theme.HavenCast" parent="Theme.Material3.DayNight.NoActionBar">
         <item name="colorPrimary">@color/brand</item>
         <item name="colorOnPrimary">@color/on_brand</item>
         <item name="colorSurface">@color/window_bg</item>

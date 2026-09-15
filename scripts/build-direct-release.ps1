@@ -1,6 +1,6 @@
 param(
-    [string]$StoreFile = 'C:\Users\Administrator\DomoCast-keys\domocast-app-signing.p12',
-    [string]$KeyAlias = 'domocast-app-signing'
+    [string]$StoreFile = 'C:\Users\Administrator\HavenCast-keys\havencast-app-signing.p12',
+    [string]$KeyAlias = 'havencast-app-signing'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -16,17 +16,17 @@ if ($resolvedStoreFile.StartsWith($repoPrefix, [StringComparison]::OrdinalIgnore
     throw 'The app signing keystore must be outside the repository.'
 }
 
-$securePassword = Read-Host 'Enter the DomoCast app signing key password' -AsSecureString
+$securePassword = Read-Host 'Enter the HavenCast app signing key password' -AsSecureString
 $plainPassword = [System.Net.NetworkCredential]::new('', $securePassword).Password
 
 try {
     New-Item -ItemType Directory -Force -Path $shortTemp | Out-Null
     $env:TEMP = $shortTemp
     $env:TMP = $shortTemp
-    $env:DOMOCAST_RELEASE_STORE_FILE = $resolvedStoreFile
-    $env:DOMOCAST_RELEASE_STORE_PASSWORD = $plainPassword
-    $env:DOMOCAST_RELEASE_KEY_ALIAS = $KeyAlias
-    $env:DOMOCAST_RELEASE_KEY_PASSWORD = $plainPassword
+    $env:HAVENCAST_RELEASE_STORE_FILE = $resolvedStoreFile
+    $env:HAVENCAST_RELEASE_STORE_PASSWORD = $plainPassword
+    $env:HAVENCAST_RELEASE_KEY_ALIAS = $KeyAlias
+    $env:HAVENCAST_RELEASE_KEY_PASSWORD = $plainPassword
     $env:GRADLE_USER_HOME = Join-Path $repoRoot '.gradle-home'
     $env:ANDROID_USER_HOME = Join-Path $repoRoot '.android-home'
 
@@ -63,10 +63,10 @@ try {
     Write-Host "Direct-distribution APK generated and signature verified: $apkPath" -ForegroundColor Green
 }
 finally {
-    Remove-Item Env:DOMOCAST_RELEASE_STORE_FILE -ErrorAction SilentlyContinue
-    Remove-Item Env:DOMOCAST_RELEASE_STORE_PASSWORD -ErrorAction SilentlyContinue
-    Remove-Item Env:DOMOCAST_RELEASE_KEY_ALIAS -ErrorAction SilentlyContinue
-    Remove-Item Env:DOMOCAST_RELEASE_KEY_PASSWORD -ErrorAction SilentlyContinue
+    Remove-Item Env:HAVENCAST_RELEASE_STORE_FILE -ErrorAction SilentlyContinue
+    Remove-Item Env:HAVENCAST_RELEASE_STORE_PASSWORD -ErrorAction SilentlyContinue
+    Remove-Item Env:HAVENCAST_RELEASE_KEY_ALIAS -ErrorAction SilentlyContinue
+    Remove-Item Env:HAVENCAST_RELEASE_KEY_PASSWORD -ErrorAction SilentlyContinue
     $env:TEMP = $originalTemp
     $env:TMP = $originalTmp
     $plainPassword = $null

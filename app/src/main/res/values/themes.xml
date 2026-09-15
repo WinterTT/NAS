@@ -1,6 +1,6 @@
 <resources xmlns:tools="http://schemas.android.com/tools">
     <!-- 亮色主题：品牌色引用语义色（深色由 values-night 覆盖同名） -->
-    <style name="Base.Theme.MyUPNP" parent="Theme.Material3.DayNight.NoActionBar">
+    <style name="Base.Theme.HavenCast" parent="Theme.Material3.DayNight.NoActionBar">
         <item name="colorPrimary">@color/brand</item>
         <item name="colorOnPrimary">@color/on_brand</item>
         <item name="colorSurface">@color/window_bg</item>
@@ -11,5 +11,5 @@
         <item name="android:windowBackground">@color/window_bg</item>
     </style>
 
-    <style name="Theme.MyUPNP" parent="Base.Theme.MyUPNP" />
+    <style name="Theme.HavenCast" parent="Base.Theme.HavenCast" />
 </resources>

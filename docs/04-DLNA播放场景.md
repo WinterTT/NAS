@@ -1,4 +1,4 @@
-# MyUPNP 学习笔记
+# HavenCast 学习笔记
 
 用 Android 工程从零手写 UPnP（不依赖任何 UPnP/DLNA 库），一边学协议一边写代码。
 
