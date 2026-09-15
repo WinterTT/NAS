@@ -100,7 +100,8 @@ object FeedbackReporter {
         val body = buildBody(activity, draft)
 
         if (hasMailTarget()) {
-            val mail = Intent(Intent.ACTION_SENDTO, Uri.parse("mailto:$FEEDBACK_EMAIL")).apply {
+            val mail = Intent(Intent.ACTION_SENDTO, mailtoUri(FEEDBACK_EMAIL, subject, body)).apply {
+                // extras 只为少数只认 extras 的客户端兜底；能进正文的是 URI 里的参数（见 mailtoUri）
                 putExtra(Intent.EXTRA_SUBJECT, subject)
                 putExtra(Intent.EXTRA_TEXT, body)
             }
@@ -113,6 +114,27 @@ object FeedbackReporter {
         }
         return share(activity, subject, body)
     }
+
+    /**
+     * 组装 mailto: 链接。
+     *
+     * 两个坑都踩过：
+     * 1) `ACTION_SENDTO` 只认 data URI，`EXTRA_SUBJECT` / `EXTRA_TEXT` 是给 `ACTION_SEND` 用的，
+     *    Gmail 等客户端会直接忽略 → 用户看到的是一封空邮件。主题/正文必须写进查询参数。
+     * 2) 不能写 `Uri.parse("mailto:$address").buildUpon().appendQueryParameter(...)`：
+     *    `mailto:x@y.com` 是 opaque URI，Builder 追加 query 时会把 `x@y.com` 丢掉，
+     *    结果变成 `mailto:?subject=…`（实测收件人凭空消失）。所以手工拼串。
+     *
+     * 换行按 RFC 6068 用 %0D%0A；`Uri.encode` 负责把中文/空格等按 UTF-8 百分号编码。
+     */
+    private fun mailtoUri(address: String, subject: String, body: String): Uri {
+        val query = "subject=" + Uri.encode(subject) + "&body=" + Uri.encode(crlf(body))
+        return Uri.parse("mailto:" + address.trim() + "?" + query)
+    }
+
+    /** RFC 6068 要求 mailto 里的换行是 CRLF，否则部分客户端会把整段挤成一行 */
+    private fun crlf(text: String): String =
+        text.replace("\r\n", "\n").replace("\n", "\r\n")
 
     private fun share(activity: Activity, subject: String, body: String): Channel {
         val share = Intent(Intent.ACTION_SEND).apply {
