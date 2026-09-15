@@ -24,11 +24,11 @@ import android.widget.Toast
 object FeedbackReporter {
 
     /**
-     * 反馈邮箱。留空 = 不写死邮箱，走"系统分享 / 复制"。
-     * 发布前把它换成真实收件地址（例如 havencast@xxx.com），
-     * 设置页的按钮会自动从「分享反馈」变成「发送邮件」。
+     * 反馈邮箱。填了它设置页的按钮就是「发送邮件」（直接进邮件应用，主题+正文已写好）；
+     * 留空则按钮为「分享反馈」，走系统分享面板（用户自己挑邮件/微信等）。
+     * 三档兜底始终存在：邮件应用不可用 → 分享；分享也没有 → 复制到剪贴板。
      */
-    const val FEEDBACK_EMAIL = ""
+    const val FEEDBACK_EMAIL = "528231257@qq.com"
 
     /** 投递结果：Activity 据此给出对应提示 */
     enum class Channel { MAIL, SHARE, CLIPBOARD }
