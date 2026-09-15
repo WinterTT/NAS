@@ -42,6 +42,11 @@
 - **UI 里不要用 unicode 符号当图标**（▶ ⏹ − ＋ 在用户机型上不渲染）→ 一律用矢量 drawable。
 - **不要依赖主题色给的按钮字色**：显式设 `textColor` / 背景 drawable。
 - **DLNA 服务器返回的 URL 常未转义**（含空格/中文）→ 本机播放前做百分号编码（见 `LocalPlayer.encodeUrl`）。
+- **发邮件用 `ACTION_SENDTO` + `mailto:` 时，主题/正文只能写进 URI 查询参数**：
+  `EXTRA_SUBJECT` / `EXTRA_TEXT` 是给 `ACTION_SEND` 的，Gmail 等客户端会直接忽略（用户收到空邮件）。
+  而且**不能**用 `Uri.parse("mailto:x@y.com").buildUpon().appendQueryParameter(...)`——
+  `mailto:` 是 opaque URI，追加 query 会把地址丢掉，实测变成 `mailto:?subject=…`（收件人凭空消失）。
+  正确做法是手工拼串 + `Uri.encode`，换行按 RFC 6068 用 `%0D%0A`（见 `FeedbackReporter.mailtoUri`）。
 - **别把 `ANDROID_USER_HOME` 指到工程内**：AGP 会改用它下面的 `debug.keystore` 签名，
   与默认 `%USERPROFILE%\.android\debug.keystore` 签出来的 APK 签名不一致 →
   `adb install -r` 报 `INSTALL_FAILED_UPDATE_INCOMPATIBLE`，只能卸载重装（会清掉索引/收藏）。
