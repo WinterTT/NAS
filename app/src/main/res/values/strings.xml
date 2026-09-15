@@ -24,4 +24,40 @@
     <string name="lib_subtitle">找到的媒体服务器，点开就能翻曲库</string>
     <string name="lib_empty">还没有发现媒体服务器\n先点右上角「开始扫描」\n（手机需与服务器在同一 Wi-Fi）</string>
     <string name="swipe_hint">下滑收起本页</string>
+
+    <!-- 设置页：帮助与反馈 -->
+    <string name="settings_help_section">帮助与反馈</string>
+    <string name="feedback_entry">意见反馈</string>
+    <string name="feedback_entry_subtitle">遇到问题或有想要的功能？告诉我们，可选附带版本与设备信息</string>
+    <string name="feedback_title">意见反馈</string>
+    <string name="feedback_intro">你的反馈会帮我们把 HavenCast 做得更好。请尽量写清楚：什么设备、什么操作、期望的结果。</string>
+    <string name="feedback_type_label">反馈类型</string>
+    <string name="feedback_hint_detail">请描述遇到的问题或想要的功能…</string>
+    <string name="feedback_hint_contact">联系方式（可选，方便我们回复你）</string>
+    <string name="feedback_attach_info">附带版本与设备信息（便于定位问题）</string>
+    <string name="feedback_footer">反馈不包含任何个人文件内容；发出前你可以自行删改上面的信息。</string>
+    <string name="feedback_send_mail">发送邮件</string>
+    <string name="feedback_share">分享反馈</string>
+    <string name="feedback_share_title">选择发送反馈的方式</string>
+    <string name="feedback_copy">复制</string>
+    <string name="feedback_copy_done">反馈内容已复制，粘贴给我们即可</string>
+    <string name="feedback_need_detail">请先填写反馈内容</string>
+    <string name="feedback_mail_opened">已为你打开邮件应用，点「发送」即可</string>
+    <string name="feedback_share_opened">已打开分享面板，选一个应用发给我们</string>
+
+    <string-array name="feedback_types">
+        <item>功能建议</item>
+        <item>问题反馈</item>
+        <item>曲库索引</item>
+        <item>其他</item>
+    </string-array>
+
+    <!-- 设置页：关于与法务信息 -->
+    <string name="app_information">应用信息</string>
+    <string name="about_havencast">关于 HavenCast</string>
+    <string name="privacy_policy">隐私政策</string>
+    <string name="open_source_licenses">第三方开源许可</string>
+    <string name="version_unknown">未知</string>
+    <string name="about_message">HavenCast\n\n版本：%1$s（%2$d）\n包名：%3$s\n\nHavenCast 是一款家庭局域网媒体遥控器，可发现、浏览并控制 DLNA/UPnP 媒体设备。</string>
+    <string name="open_source_dependencies">以下为 HavenCast Release 直接依赖的第三方组件（均采用 Apache License 2.0）：\n\n• AndroidX Core KTX 1.10.1\n• AndroidX Activity KTX 1.8.0\n• AndroidX AppCompat 1.6.1\n• AndroidX ConstraintLayout 2.1.4\n• AndroidX Lifecycle ViewModel KTX 2.8.7\n• AndroidX Lifecycle Runtime KTX 2.8.7\n• AndroidX Media3 ExoPlayer 1.11.0\n• Material Components for Android 1.10.0\n• Kotlinx Coroutines Android 1.8.1\n\n以下是 Apache License 2.0 全文：</string>
 </resources>

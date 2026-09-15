@@ -510,71 +510,199 @@
         </FrameLayout>
 
         <!-- ========== 页 3：设置（预留，后续扩展） ========== -->
-        <LinearLayout
+        <ScrollView
             android:id="@+id/pageSettings"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
-            android:orientation="vertical"
             android:visibility="gone"
+            android:fillViewport="true"
             tools:visibility="gone">
-
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="16dp"
-                android:layout_marginTop="16dp"
-                android:layout_marginEnd="16dp"
-                android:text="设置"
-                android:textColor="@color/text_primary"
-                android:textSize="20sp"
-                android:textStyle="bold" />
 
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginHorizontal="12dp"
-                android:layout_marginTop="14dp"
-                android:background="@drawable/bg_row_card"
                 android:orientation="vertical"
-                android:paddingHorizontal="16dp"
-                android:paddingVertical="14dp">
+                android:paddingBottom="24dp">
 
                 <TextView
-                    android:layout_width="wrap_content"
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="后续会在这里提供："
-                    android:textColor="@color/text_secondary"
-                    android:textSize="13sp" />
-
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="6dp"
-                    android:text="· 去广告（NO_ADS）\n· 服务器助手（建目录 / 整理）\n· 设备管理（收藏的服务器可长按管理）"
-                    android:lineSpacingExtra="4dp"
+                    android:layout_marginStart="16dp"
+                    android:layout_marginTop="16dp"
+                    android:layout_marginEnd="16dp"
+                    android:text="设置"
                     android:textColor="@color/text_primary"
-                    android:textSize="14sp" />
+                    android:textSize="20sp"
+                    android:textStyle="bold" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginHorizontal="12dp"
+                    android:layout_marginTop="14dp"
+                    android:background="@drawable/bg_row_card"
+                    android:orientation="vertical"
+                    android:paddingHorizontal="16dp"
+                    android:paddingVertical="14dp">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="后续会在这里提供："
+                        android:textColor="@color/text_secondary"
+                        android:textSize="13sp" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="6dp"
+                        android:text="· 去广告（NO_ADS）\n· 服务器助手（建目录 / 整理）\n· 设备管理（收藏的服务器可长按管理）"
+                        android:lineSpacingExtra="4dp"
+                        android:textColor="@color/text_primary"
+                        android:textSize="14sp" />
+                </LinearLayout>
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginHorizontal="16dp"
+                    android:layout_marginTop="18dp"
+                    android:text="提示：在「媒体库」长按一台服务器，可以收藏置顶 / 重命名。"
+                    android:textColor="@color/text_faint"
+                    android:textSize="12sp" />
+
+                <TextView
+                    android:id="@+id/tvSettingsInfo"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginHorizontal="16dp"
+                    android:layout_marginTop="14dp"
+                    android:lineSpacingExtra="3dp"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="12sp" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="16dp"
+                    android:layout_marginTop="24dp"
+                    android:layout_marginEnd="16dp"
+                    android:text="@string/settings_help_section"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="13sp"
+                    android:textStyle="bold" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginHorizontal="12dp"
+                    android:layout_marginTop="8dp"
+                    android:background="@drawable/bg_row_card"
+                    android:orientation="vertical">
+
+                    <LinearLayout
+                        android:id="@+id/entryFeedback"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:background="@drawable/bg_settings_entry"
+                        android:clickable="true"
+                        android:contentDescription="@string/feedback_entry"
+                        android:focusable="true"
+                        android:orientation="vertical"
+                        android:paddingHorizontal="16dp"
+                        android:paddingVertical="15dp">
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="@string/feedback_entry"
+                            android:textColor="@color/text_primary"
+                            android:textSize="16sp" />
+
+                        <TextView
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="3dp"
+                            android:lineSpacingExtra="2dp"
+                            android:text="@string/feedback_entry_subtitle"
+                            android:textColor="@color/text_secondary"
+                            android:textSize="12sp" />
+                    </LinearLayout>
+                </LinearLayout>
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="16dp"
+                    android:layout_marginTop="24dp"
+                    android:layout_marginEnd="16dp"
+                    android:text="@string/app_information"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="13sp"
+                    android:textStyle="bold" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginHorizontal="12dp"
+                    android:layout_marginTop="8dp"
+                    android:background="@drawable/bg_row_card"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:id="@+id/entryAbout"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:background="@drawable/bg_settings_entry"
+                        android:contentDescription="@string/about_havencast"
+                        android:focusable="true"
+                        android:clickable="true"
+                        android:paddingHorizontal="16dp"
+                        android:paddingVertical="15dp"
+                        android:text="@string/about_havencast"
+                        android:textColor="@color/text_primary"
+                        android:textSize="16sp" />
+
+                    <View
+                        android:layout_width="match_parent"
+                        android:layout_height="1dp"
+                        android:background="@color/divider" />
+
+                    <TextView
+                        android:id="@+id/entryPrivacyPolicy"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:background="@drawable/bg_settings_entry"
+                        android:contentDescription="@string/privacy_policy"
+                        android:focusable="true"
+                        android:clickable="true"
+                        android:paddingHorizontal="16dp"
+                        android:paddingVertical="15dp"
+                        android:text="@string/privacy_policy"
+                        android:textColor="@color/text_primary"
+                        android:textSize="16sp" />
+
+                    <View
+                        android:layout_width="match_parent"
+                        android:layout_height="1dp"
+                        android:background="@color/divider" />
+
+                    <TextView
+                        android:id="@+id/entryOpenSourceLicenses"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:background="@drawable/bg_settings_entry"
+                        android:contentDescription="@string/open_source_licenses"
+                        android:focusable="true"
+                        android:clickable="true"
+                        android:paddingHorizontal="16dp"
+                        android:paddingVertical="15dp"
+                        android:text="@string/open_source_licenses"
+                        android:textColor="@color/text_primary"
+                        android:textSize="16sp" />
+                </LinearLayout>
             </LinearLayout>
-
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginHorizontal="16dp"
-                android:layout_marginTop="18dp"
-                android:text="提示：在「媒体库」长按一台服务器，可以收藏置顶 / 重命名。"
-                android:textColor="@color/text_faint"
-                android:textSize="12sp" />
-
-            <TextView
-                android:id="@+id/tvSettingsInfo"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginHorizontal="16dp"
-                android:layout_marginTop="14dp"
-                android:lineSpacingExtra="3dp"
-                android:textColor="@color/text_secondary"
-                android:textSize="12sp" />
-        </LinearLayout>
+        </ScrollView>
 
         <!-- ========== 页 4：搜索（本地索引 + 服务器搜索，从媒体库进入） ========== -->
         <LinearLayout

@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 可选中标签（反馈类型）：选中=品牌色填充，未选中=描边幽灵态。
+     配合 res/color/chip_text.xml 一起用，文字颜色随选中状态变化。 -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_selected="true">
+        <shape android:shape="rectangle">
+            <solid android:color="@color/brand" />
+            <corners android:radius="16dp" />
+        </shape>
+    </item>
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="@android:color/transparent" />
+            <stroke
+                android:width="1dp"
+                android:color="@color/divider" />
+            <corners android:radius="16dp" />
+        </shape>
+    </item>
+</selector>

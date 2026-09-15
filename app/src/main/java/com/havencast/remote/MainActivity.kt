@@ -18,6 +18,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.ArrayAdapter
 import android.widget.Button
+import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.ImageButton
 import android.widget.LinearLayout
@@ -343,6 +344,13 @@ class MainActivity : AppCompatActivity() {
         tvNowMeta = findViewById(R.id.tvNowMeta)
         listLibrary = findViewById(R.id.listLibrary)
         tvLibEmpty = findViewById(R.id.tvLibEmpty)
+
+        findViewById<TextView>(R.id.entryAbout).setOnClickListener { showAboutDialog() }
+        findViewById<TextView>(R.id.entryPrivacyPolicy).setOnClickListener { showPrivacyPolicy() }
+        findViewById<TextView>(R.id.entryOpenSourceLicenses).setOnClickListener {
+            showOpenSourceLicenses()
+        }
+        findViewById<View>(R.id.entryFeedback).setOnClickListener { showFeedbackDialog() }
 
         // 播放/暂停、停止
         btnNowPlayPause.setOnClickListener { togglePlayPause() }
@@ -1589,6 +1597,164 @@ class MainActivity : AppCompatActivity() {
         }
         if (tvSettingsInfo.text.toString() != text) tvSettingsInfo.text = text
     }
+
+    /** 设置页的关于信息从已安装包读取，避免与发布版本不一致。 */
+    private fun showAboutDialog() {
+        val packageInfo = packageManager.getPackageInfo(packageName, 0)
+        val versionCode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            packageInfo.longVersionCode
+        } else {
+            @Suppress("DEPRECATION")
+            packageInfo.versionCode.toLong()
+        }
+        val versionName = packageInfo.versionName ?: getString(R.string.version_unknown)
+        AlertDialog.Builder(this)
+            .setTitle(R.string.about_havencast)
+            .setMessage(getString(R.string.about_message, versionName, versionCode, packageName))
+            .setPositiveButton(android.R.string.ok, null)
+            .show()
+    }
+
+    private fun showPrivacyPolicy() {
+        showDocumentDialog(
+            getString(R.string.privacy_policy),
+            readRawText(R.raw.privacy_policy),
+        )
+    }
+
+    private fun showOpenSourceLicenses() {
+        val document = getString(R.string.open_source_dependencies) + "\n\n" +
+            readRawText(R.raw.apache_license_2_0)
+        showDocumentDialog(getString(R.string.open_source_licenses), document)
+    }
+
+    private fun showDocumentDialog(title: String, document: String) {
+        val contentView = layoutInflater.inflate(R.layout.dialog_legal_document, null)
+        contentView.findViewById<TextView>(R.id.tvLegalDocument).text = document
+        AlertDialog.Builder(this)
+            .setTitle(title)
+            .setView(contentView)
+            .setPositiveButton(android.R.string.ok, null)
+            .show()
+    }
+
+    // ------------------------------------------------------------------
+    // 设置页：意见反馈
+    // ------------------------------------------------------------------
+
+    /**
+     * 意见反馈对话框：类型标签 + 描述 + 可选联系方式 + 可选环境信息。
+     * 内容由 FeedbackReporter 整理后交给邮件 / 分享 / 剪贴板（哪个能用用哪个）。
+     */
+    private fun showFeedbackDialog() {
+        val content = layoutInflater.inflate(R.layout.dialog_feedback, null)
+        val chipIds = listOf(
+            R.id.chipFeedbackType0,
+            R.id.chipFeedbackType1,
+            R.id.chipFeedbackType2,
+            R.id.chipFeedbackType3,
+        )
+        val typeLabels = resources.getStringArray(R.array.feedback_types)
+        val chips = chipIds.mapNotNull { content.findViewById<TextView>(it) }
+        chips.forEachIndexed { index, chip ->
+            chip.text = typeLabels.getOrElse(index) { "" }
+            chip.setOnClickListener { selectFeedbackType(chips, index) }
+        }
+        selectFeedbackType(chips, 0)
+
+        val etDetail = content.findViewById<EditText>(R.id.etFeedbackDetail)
+        val etContact = content.findViewById<EditText>(R.id.etFeedbackContact)
+        val cbInfo = content.findViewById<CheckBox>(R.id.cbFeedbackInfo)
+        val tvInfo = content.findViewById<TextView>(R.id.tvFeedbackInfo)
+        tvInfo.text = feedbackDiagnostics()
+        cbInfo.setOnCheckedChangeListener { _, checked ->
+            tvInfo.visibility = if (checked) View.VISIBLE else View.GONE
+        }
+
+        val sendLabel = getString(
+            if (FeedbackReporter.hasMailTarget()) R.string.feedback_send_mail
+            else R.string.feedback_share
+        )
+        val dialog = AlertDialog.Builder(this)
+            .setTitle(R.string.feedback_title)
+            .setView(content)
+            .setPositiveButton(sendLabel, null)
+            .setNeutralButton(R.string.feedback_copy, null)
+            .setNegativeButton(android.R.string.cancel, null)
+            .create()
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val draft = collectFeedbackDraft(chips, etDetail, etContact, cbInfo, tvInfo)
+                    ?: return@setOnClickListener
+                when (FeedbackReporter.send(this, draft)) {
+                    FeedbackReporter.Channel.MAIL ->
+                        vm.postMessage(getString(R.string.feedback_mail_opened))
+                    FeedbackReporter.Channel.SHARE ->
+                        vm.postMessage(getString(R.string.feedback_share_opened))
+                    FeedbackReporter.Channel.CLIPBOARD ->
+                        vm.postMessage(getString(R.string.feedback_copy_done))
+                }
+                dialog.dismiss()
+            }
+            dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener {
+                val draft = collectFeedbackDraft(chips, etDetail, etContact, cbInfo, tvInfo)
+                    ?: return@setOnClickListener
+                FeedbackReporter.copyToClipboard(
+                    this,
+                    FeedbackReporter.subjectOf(this, draft) + "\n\n" +
+                        FeedbackReporter.buildBody(this, draft)
+                )
+                FeedbackReporter.toastCopied(this)
+                dialog.dismiss()
+            }
+        }
+        dialog.show()
+    }
+
+    private fun selectFeedbackType(chips: List<TextView>, selected: Int) {
+        chips.forEachIndexed { index, chip -> chip.isSelected = index == selected }
+    }
+
+    /** 收集输入；内容为空时提示并返回 null（对话框不关闭） */
+    private fun collectFeedbackDraft(
+        chips: List<TextView>,
+        etDetail: EditText,
+        etContact: EditText,
+        cbInfo: CheckBox,
+        tvInfo: TextView,
+    ): FeedbackReporter.Draft? {
+        val detail = etDetail.text.toString().trim()
+        if (detail.isEmpty()) {
+            Toast.makeText(this, R.string.feedback_need_detail, Toast.LENGTH_SHORT).show()
+            etDetail.requestFocus()
+            return null
+        }
+        val type = chips.firstOrNull { it.isSelected }?.text?.toString().orEmpty()
+        return FeedbackReporter.Draft(
+            type = type,
+            detail = detail,
+            contact = etContact.text.toString().trim(),
+            extraInfo = if (cbInfo.isChecked) tvInfo.text.toString() else null,
+        )
+    }
+
+    /** 反馈里附带的环境信息：版本/系统/机型 + App 自身的运行状态（不涉及文件内容） */
+    private fun feedbackDiagnostics(): String {
+        val state = vm.uiState.value
+        val appLines = buildList {
+            add("当前网络：${NetworkScope.labelOf(NetworkScope.current())}")
+            add("已发现媒体服务器：${vm.deviceEntriesFavoritesFirst().size} 台")
+            add("本机音乐索引：${vm.localMusicCount()} 首")
+            if (state.nowPlayingActive) {
+                val where = if (state.nowPlayingIsLocal) "本机" else state.nowPlayingDevice
+                add("正在播放：$where · ${state.nowPlayingTitle}")
+            }
+        }
+        return FeedbackReporter.buildInfo(this, appLines)
+    }
+
+    private fun readRawText(resId: Int): String =
+        resources.openRawResource(resId).bufferedReader(Charsets.UTF_8).use { it.readText() }
 
     /** 音量滑杆松手：把音量设到目标值（乐观更新 + 后台 SetVolume） */
     private fun sendVolume(target: Int) {

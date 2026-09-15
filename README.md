@@ -17,6 +17,7 @@
 | `docs/07-代码架构.md` | 分层、线程模型、文件职责、扩展指南、收费口子、已知问题 |
 | `docs/08-换电脑继续开发.md` | 换机清单：代码搬迁、JDK/SDK/Gradle、构建命令、数据位置 |
 | [`docs/09-Release发布.md`](docs/09-Release发布.md) | Release 签名、AAB 构建、验证与 Google Play 内部测试 |
+| [`docs/10-隐私政策.md`](docs/10-隐私政策.md) | HavenCast 应用内隐私政策的未来网页源稿 |
 
 ## 构建
 
