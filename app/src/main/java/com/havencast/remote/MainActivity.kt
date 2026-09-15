@@ -20,6 +20,7 @@ import android.widget.ArrayAdapter
 import android.widget.Button
 import android.widget.CheckBox
 import android.widget.EditText
+import android.widget.FrameLayout
 import android.widget.ImageButton
 import android.widget.LinearLayout
 import android.widget.ListView
@@ -90,6 +91,9 @@ class MainActivity : AppCompatActivity() {
     private val searchItems = ArrayList<MediaItem>()
     private var indexDialog: AlertDialog? = null
     private lateinit var tvSettingsInfo: TextView
+
+    // ===== 广告（只在媒体库页底部一条横幅，见 ads/AdsManager） =====
+    private lateinit var adBannerContainer: FrameLayout
 
     // ===== 服务器曲库（索引后的分类浏览） =====
     private lateinit var pageServer: View
@@ -655,6 +659,12 @@ class MainActivity : AppCompatActivity() {
         refreshLibraryRows()
         updateSettingsInfo()
 
+        // 广告：走 Google UMP 同意流程后初始化 SDK，再把自适应横幅挂到媒体库页底部。
+        // 全程异步，任何一步失败都只是"没有广告"，不影响扫描/浏览/播放等主流程。
+        adBannerContainer = findViewById(R.id.adBannerContainer)
+        vm.ads.initialize(this)
+        vm.ads.attachBanner(this, adBannerContainer)
+
         // 首次使用引导（只弹一次）
         val onboardPrefs = getSharedPreferences("ui_onboarding", MODE_PRIVATE)
         if (!onboardPrefs.getBoolean("shown_v1", false)) {
@@ -810,11 +820,22 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        vm.ads.resume()
+    }
+
+    override fun onPause() {
+        vm.ads.pause()
+        super.onPause()
+    }
+
     override fun onDestroy() {
         runCatching {
             val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
             cm.unregisterNetworkCallback(networkCallback)
         }
+        vm.ads.destroy() // 销毁 AdView，别让广告拿住已销毁的 Activity
         vm.onHostDestroyed()
         // executor 由 MainViewModel.onCleared 统一释放
         super.onDestroy()

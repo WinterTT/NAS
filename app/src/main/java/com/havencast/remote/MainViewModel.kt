@@ -11,6 +11,7 @@ import android.os.Looper
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.havencast.remote.ads.AdsManager
 import com.havencast.remote.core.EverythingFreeGate
 import com.havencast.remote.core.FeatureGate
 import com.havencast.remote.core.FeatureId
@@ -518,6 +519,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     /** 本地文件 HTTP 服务（第 7 课 B：把手机里的媒体推给音箱/电视） */
     val fileServer = LocalFileServer(getApplication())
+
+    /**
+     * 广告（AdMob）：同意流程 + 横幅。
+     * 构造期不发任何网络请求、不回调 UI（同意流程与 SDK 初始化由 Activity 就绪后
+     * 显式调用 [com.havencast.remote.ads.AdsManager.initialize]）。
+     */
+    val ads = AdsManager(getApplication())
 
     /**
      * 本机音乐播放器（第 13 课：本机播放只处理音频，复用 App 播放页）。

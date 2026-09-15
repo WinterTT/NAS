@@ -11,7 +11,8 @@
 用于把家里的 DLNA 音箱 / 电视 / PC 媒体服务器统一成一个"遥控器 + 媒体库"。
 正式包名 `com.havencast.remote`。中文界面，面向普通用户做产品化。
 
-定位：**精简易用**；广告将来接入但不能打断播放；后续收费方向是"帮用户管理服务器"（建目录/清理/推荐）。
+定位：**精简易用**；广告只在「媒体库」页底部放一条横幅、绝不打断播放；
+后续收费方向是"帮用户管理服务器"（建目录/清理/推荐）与去广告。
 
 ---
 
@@ -93,6 +94,7 @@ app/src/main/java/com/havencast/remote/
 ├── FeedbackReporter.kt      意见反馈：内容成文 + 环境信息 + 投递（邮件/分享/剪贴板）
 ├── ImagePreviewActivity.kt  图片预览（双指缩放/拖动/轻点关闭）
 ├── NetworkScope.kt          网络作用域（按网段 net:192.168.1 隔离数据）
+├── ads/                     AdMob：AdsManager（UMP 同意 → 初始化 → 媒体库页底部横幅）/ AdPolicy（去广告开关）
 ├── core/                    FeatureGate / FeatureId / EverythingFreeGate（收费口子，现全免费）
 ├── dlna/  ssdp/  soap/  gena/  device/  model/    协议层（无 UI 依赖）
 ```
@@ -128,6 +130,10 @@ app/src/main/java/com/havencast/remote/
 - **设置页**：帮助与反馈（意见反馈：类型标签 + 描述 + 可选联系方式 + 可附带版本/机型/网络/索引诊断信息，
   经邮件/系统分享/剪贴板投递；收件邮箱见 `FeedbackReporter.FEEDBACK_EMAIL`，留空则走系统分享）、
   应用信息（关于 / 隐私政策 / 第三方开源许可）
+- **广告（AdMob）**：仅「媒体库」页底部一条自适应横幅（播放页等一律不放，不做插屏/开屏）；
+  走 Google UMP 同意流程后初始化 SDK，全程异步、失败即隐藏、不阻塞任何主流程；
+  去广告开关是 `AdPolicy`（将来接 Billing / 激励视频）；
+  测试期用 Google 官方测试 ID，Release 构建有 `checkAdMobTestIds` 闸门拦住测试 ID 上架
 
 ## 6. 已知问题
 
@@ -156,3 +162,4 @@ app/src/main/java/com/havencast/remote/
 | `docs/08-换电脑继续开发.md` | 换机清单：代码搬迁、JDK/SDK/Gradle、构建、数据位置、DSH 迁移 |
 | `docs/09-Release发布.md` | 双密钥签名、AAB/APK 构建脚本、R8、Play App Signing |
 | `docs/10-隐私政策.md` | 隐私政策正文（App 内 `raw/privacy_policy.txt` 是同一份内容） |
+| `docs/11-广告接入.md` | AdMob：产品原则、代码结构、上线前改 ID / Data safety、UMP 合规、已知坑 |

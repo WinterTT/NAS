@@ -21,6 +21,8 @@
     <uses-permission
         android:name="android.permission.NEARBY_WIFI_DEVICES"
         android:usesPermissionFlags="neverForLocation" />
+    <!-- 广告标识符：AdMob 用于频次控制与广告相关性；Play 的 Data safety 里要如实申报 -->
+    <uses-permission android:name="com.google.android.gms.permission.AD_ID" />
 
     <!-- Android 11+ 包可见性：意见反馈需要判断本机有没有邮件/分享应用可选 -->
     <queries>
@@ -46,6 +48,10 @@
         android:usesCleartextTraffic="true">
         <!-- usesCleartextTraffic=true：UPnP 设备描述/控制走 http 明文，
              Android 9+ 默认禁止明文，学习阶段先全局放开 -->
+        <!-- AdMob 应用 ID（AdMob 后台创建应用时生成；测试期用官方测试 ID） -->
+        <meta-data
+            android:name="com.google.android.gms.ads.APPLICATION_ID"
+            android:value="@string/admob_app_id" />
         <activity
             android:name=".MainActivity"
             android:exported="true"

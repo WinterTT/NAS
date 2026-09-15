@@ -219,6 +219,16 @@
                     android:visibility="gone"
                     tools:visibility="visible" />
             </FrameLayout>
+
+            <!-- 广告位：只在媒体库页底部放一条自适应横幅（播放页永不放广告）。
+                 初始 gone，拉到广告才显示；拉不到就一直是 gone，不留空白。 -->
+            <FrameLayout
+                android:id="@+id/adBannerContainer"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:visibility="gone"
+                tools:visibility="gone" />
         </LinearLayout>
 
         <!-- ========== 页 2：正在播放（完整页，参考主流音乐 App） ========== -->

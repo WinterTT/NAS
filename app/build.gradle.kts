@@ -73,6 +73,27 @@ androidComponents {
     }
 }
 
+/**
+ * 发布闸门：AdMob 官方测试 ID 不能进 Release。
+ * 测试 ID 出不了广告收入，而且商店审核可能判定为无效流量。
+ * 把 src/main/res/values/ad_config.xml 换成自己的 App ID / 广告位 ID 后，这个检查自然通过。
+ */
+val checkAdMobTestIds by tasks.registering {
+    description = "校验 Release 没有使用 AdMob 官方测试 ID"
+    val adConfigFile = layout.projectDirectory.file("src/main/res/values/ad_config.xml").asFile
+    inputs.file(adConfigFile)
+    doLast {
+        val text = adConfigFile.readText()
+        check(!text.contains("3940256099942544")) {
+            "ad_config.xml 里还是 AdMob 官方测试 ID，不能用于 Release。请先换成自己账号下的 App ID 与广告位 ID（见 docs/11-广告接入.md）。"
+        }
+    }
+}
+
+tasks.matching { it.name == "preReleaseBuild" }.configureEach {
+    dependsOn(checkAdMobTestIds)
+}
+
 dependencies {
     implementation(libs.androidx.activity.ktx)
     implementation(libs.androidx.appcompat)
@@ -83,6 +104,10 @@ dependencies {
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.androidx.media3.exoplayer)
     implementation(libs.material)
+
+    // 广告：AdMob SDK + 同意流程（UMP）
+    implementation(libs.play.services.ads)
+    implementation(libs.user.messaging.platform)
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(libs.androidx.junit)
