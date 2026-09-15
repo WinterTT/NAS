@@ -2,18 +2,19 @@
 <!--
   AdMob 配置（唯一的改动点）
   ================================================================
-  下面两个值现在是 **Google 官方测试 ID**：任何设备上都能稳定出测试广告，
-  不会产生收入、也不会因为自己点自己而被封号。接入自己的账号时只改这两行：
+  admob_app_id         已填真实值（AdMob 后台 → 应用 → 应用设置 → 应用 ID）
+  admob_banner_unit_id 仍是 Google 官方测试广告位：
+                       测试广告位可以在任何 App ID 下正常出广告（不产生收入、也不会被判无效流量），
+                       所以"真实 App ID + 测试广告位"是官方推荐的开发期组合。
+                       ⚠️ 反过来（测试 App ID + 真实广告位）才是违规的，别那么干。
 
-    admob_app_id        AdMob 后台 → 应用 → 应用设置 里的「应用 ID」，
-                        形如 ca-app-pub-XXXXXXXXXXXXXXXX~YYYYYYYYYY
-    admob_banner_unit_id AdMob 后台 → 广告单元 → 横幅（建议新建「自适应横幅」），
-                        形如 ca-app-pub-XXXXXXXXXXXXXXXX/ZZZZZZZZZZ
+  待办：在 AdMob 后台「广告」→「广告单元」→ 新建广告单元 → 选择「横幅」（建议开启自适应），
+        把拿到的 ca-app-pub-8912539911574711/XXXXXXXXXX 填到下面第二行。
+        在那之前，Release 构建会被 app/build.gradle.kts 的 checkAdMobTestIds 拦住（这是故意的）。
 
-  注意：Release 构建会校验这里不能还是测试 ID（见 app/build.gradle.kts 的 checkAdMobTestIds），
-  防止带着测试 ID 直接发布。详见 docs/11-广告接入.md。
+  详见 docs/11-广告接入.md。
 -->
 <resources>
-    <string name="admob_app_id" translatable="false">ca-app-pub-3940256099942544~3347511713</string>
+    <string name="admob_app_id" translatable="false">ca-app-pub-8912539911574711~1218114790</string>
     <string name="admob_banner_unit_id" translatable="false">ca-app-pub-3940256099942544/9214589741</string>
 </resources>
