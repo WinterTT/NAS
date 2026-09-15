@@ -32,7 +32,8 @@
   - Activity **只做 UI 编排**，不创建线程池（线程池都在 `MainViewModel`）；
   - 新状态进 `UiState`（StateFlow），Activity 用 `collect` 渲染。
 - **提交习惯**：每个可编译的功能/修复单独提交，信息用中文 + 前缀（`feat(x):` / `fix(x):` / `polish(x):` / `docs:`）。
-  用户会自己 `git push`（沙箱常连不上 GitHub）。
+  一般由用户自己 `git push`；沙箱网络有时能通（2026-09-15 实测 `git push origin main` 成功），
+  可以试着推一次，失败就别重试，交给用户。
 - **能力探测要诚实**：拿不到设备声明的信息就标"未知/推测"，不要假装知道。
 
 ### 已知的"踩坑纪律"（务必遵守）
