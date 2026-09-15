@@ -42,19 +42,27 @@
 - **UI 里不要用 unicode 符号当图标**（▶ ⏹ − ＋ 在用户机型上不渲染）→ 一律用矢量 drawable。
 - **不要依赖主题色给的按钮字色**：显式设 `textColor` / 背景 drawable。
 - **DLNA 服务器返回的 URL 常未转义**（含空格/中文）→ 本机播放前做百分号编码（见 `LocalPlayer.encodeUrl`）。
+- **别把 `ANDROID_USER_HOME` 指到工程内**：AGP 会改用它下面的 `debug.keystore` 签名，
+  与默认 `%USERPROFILE%\.android\debug.keystore` 签出来的 APK 签名不一致 →
+  `adb install -r` 报 `INSTALL_FAILED_UPDATE_INCOMPATIBLE`，只能卸载重装（会清掉索引/收藏）。
+  要么不设这个变量（推荐，SDK 位置由 `local.properties` 的 `sdk.dir` 决定），要么始终用同一把 debug key。
+  换机后如果手机上的旧包是别的 key 签的，先 `apksigner verify --print-certs` 对比再决定是否卸载。
 
 ---
 
 ## 3. 构建与验证命令
 
 ```powershell
-$env:GRADLE_USER_HOME='<工程根>\.gradle-home'
-$env:ANDROID_USER_HOME='<工程根>\.android-home'
+$env:GRADLE_USER_HOME='<工程根>\.gradle-home'   # 只设这个；不要设 ANDROID_USER_HOME（见上）
 .\gradlew.bat --no-daemon :app:assembleDebug        # 产物 app\build\outputs\apk\debug\app-debug.apk
 .\gradlew.bat --no-daemon :app:testDebugUnitTest    # 既有单测回归（不新增）
 ```
 
 - 真机：`adb install -r app\build\outputs\apk\debug\app-debug.apk`，日志 `adb logcat -s HavenCast`
+- 自动化截图（本机 `adb shell input tap` 被系统拒绝时）：
+  临时在 `MainActivity.onCreate` 里按 intent extra 直开目标页面/对话框 → `adb shell am start -n ... --es xxx`，
+  **截完图必须删掉这段临时代码**；截图用 `adb shell screencap -p /sdcard/x.png` + `adb pull`
+  （`exec-out > file` 在 Windows 上会写坏 PNG），超过 2000px 需先缩放。
 - 环境要求（JDK 17/21、Android SDK platform 37、`local.properties` 的 `sdk.dir`）见 `docs/08-换电脑继续开发.md`
 
 ---
@@ -77,6 +85,7 @@ app/src/main/java/com/havencast/remote/
 ├── LibraryIndexer.kt        后台 BFS 建索引（可停/可续扫，统计跳过重复）
 ├── LocalMusicIndexer.kt     手机本地音乐索引（MediaStore → 同一张索引表，key=local:mediastore）
 ├── LocalFileServer.kt       手机当媒体源：HTTP 文件服务（支持 Range）
+├── FeedbackReporter.kt      意见反馈：内容成文 + 环境信息 + 投递（邮件/分享/剪贴板）
 ├── ImagePreviewActivity.kt  图片预览（双指缩放/拖动/轻点关闭）
 ├── NetworkScope.kt          网络作用域（按网段 net:192.168.1 隔离数据）
 ├── core/                    FeatureGate / FeatureId / EverythingFreeGate（收费口子，现全免费）
@@ -111,6 +120,9 @@ app/src/main/java/com/havencast/remote/
 - **播放模式**：顺序 / 列表循环 / 单曲循环 / 随机（播放页按钮循环切换，按网络记忆）
 - UI：底部三 Tab（媒体库/播放/设置）、播放大卡（深色沉浸）、深浅色主题、首启三步引导
 - 本地文件推送：手机起 HTTP 服务（支持 Range）推给设备
+- **设置页**：帮助与反馈（意见反馈：类型标签 + 描述 + 可选联系方式 + 可附带版本/机型/网络/索引诊断信息，
+  经邮件/系统分享/剪贴板投递；收件邮箱见 `FeedbackReporter.FEEDBACK_EMAIL`，留空则走系统分享）、
+  应用信息（关于 / 隐私政策 / 第三方开源许可）
 
 ## 6. 已知问题
 
@@ -122,8 +134,8 @@ app/src/main/java/com/havencast/remote/
 ## 7. 下一步候选（按讨论顺序）
 
 1. 媒体库页内嵌浏览（替代弹窗式浏览）。
-2. **可发布化**：定应用名、真图标、关于/隐私政策/开源许可页、
-   Release 签名 + AAB、商店素材（截图/描述/Data safety）、`NO_ADS` 与广告接入时机。
+2. **可发布化**：真图标/启动图、商店素材（截图/描述/feature graphic/Data safety）、
+   `values-en` 英文文案、`NO_ADS` 与广告接入时机、隐私政策随功能更新。
 3. 服务器助手（收费方向）：基于索引做重复清理、目录整理、推荐。
 4. 本机播放若遇平台/ExoPlayer 都解不了的格式（WMA/APE/DSD）才考虑 libVLC/FFmpeg（体积与许可成本高）。
 
@@ -137,3 +149,5 @@ app/src/main/java/com/havencast/remote/
 | `docs/01~06` | UPnP 各协议的学习笔记（SSDP/SCPD/SOAP/GENA/DLNA/曲库/设备端） |
 | `docs/07-代码架构.md` | 分层、线程模型、文件职责、扩展指南、收费口子、已知问题 |
 | `docs/08-换电脑继续开发.md` | 换机清单：代码搬迁、JDK/SDK/Gradle、构建、数据位置、DSH 迁移 |
+| `docs/09-Release发布.md` | 双密钥签名、AAB/APK 构建脚本、R8、Play App Signing |
+| `docs/10-隐私政策.md` | 隐私政策正文（App 内 `raw/privacy_policy.txt` 是同一份内容） |
