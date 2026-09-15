@@ -4,8 +4,8 @@
     android:height="24dp"
     android:viewportWidth="24"
     android:viewportHeight="24">
-    <!-- 停止：实心方块 -->
+    <!-- 停止：圆角方形，和圆形按钮的几何语言一致 -->
     <path
         android:fillColor="#FF000000"
-        android:pathData="M6,6h12v12H6z" />
+        android:pathData="M7,5h10a2,2 0,0 1,2,2v10a2,2 0,0 1,-2,2H7a2,2 0,0 1,-2,-2V7a2,2 0,0 1,2,-2z" />
 </vector>

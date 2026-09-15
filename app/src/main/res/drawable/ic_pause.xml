@@ -4,8 +4,8 @@
     android:height="24dp"
     android:viewportWidth="24"
     android:viewportHeight="24">
-    <!-- 暂停：两条竖杠 -->
+    <!-- 暂停：与播放三角等高的两条圆润竖杠 -->
     <path
         android:fillColor="#FF000000"
-        android:pathData="M6,19h4V5H6v14zM14,5v14h4V5h-4z" />
+        android:pathData="M7,5h3v14H7zM14,5h3v14h-3z" />
 </vector>

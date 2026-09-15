@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 播放/暂停主按钮的圆形底色（品牌色 + 按压反馈） -->
+<!-- 迷你播放条主操作，复用品牌圆形与按压反馈。 -->
 <ripple xmlns:android="http://schemas.android.com/apk/res/android"
     android:color="#33FFFFFF">
     <item>

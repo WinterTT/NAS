@@ -4,8 +4,8 @@
     android:height="24dp"
     android:viewportWidth="24"
     android:viewportHeight="24">
-    <!-- 播放：实心右三角 -->
+    <!-- 播放：与上一首/下一首同一视觉重心的右指三角 -->
     <path
         android:fillColor="#FF000000"
-        android:pathData="M8,5v14l11,-7z" />
+        android:pathData="M8,5.25v13.5L18.5,12z" />
 </vector>

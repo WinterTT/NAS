@@ -721,6 +721,9 @@ class MainActivity : AppCompatActivity() {
                     btnMiniPlay.setImageResource(
                         if (playing) R.drawable.ic_pause else R.drawable.ic_play
                     )
+                    val playbackAction = if (playing) "暂停" else "播放"
+                    btnNowPlayPause.contentDescription = playbackAction
+                    btnMiniPlay.contentDescription = playbackAction
 
                     tvNowDevice.text = "正在播放到：${s.nowPlayingDevice}"
                     tvNowTitle.text = s.nowPlayingTitle
