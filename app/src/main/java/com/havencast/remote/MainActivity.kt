@@ -1686,26 +1686,26 @@ class MainActivity : AppCompatActivity() {
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
                 val draft = collectFeedbackDraft(chips, etDetail, etContact, cbInfo, tvInfo)
                     ?: return@setOnClickListener
+                val body = feedbackFullText(draft)
+                dialog.dismiss()
                 when (FeedbackReporter.send(this, draft)) {
                     FeedbackReporter.Channel.MAIL ->
                         vm.postMessage(getString(R.string.feedback_mail_opened))
                     FeedbackReporter.Channel.SHARE ->
                         vm.postMessage(getString(R.string.feedback_share_opened))
-                    FeedbackReporter.Channel.CLIPBOARD ->
-                        vm.postMessage(getString(R.string.feedback_copy_done))
+                    // 本机既没有邮件应用也没有分享目标：别让用户卡在这儿，
+                    // 把内容摆出来 + 告诉他发到哪个邮箱
+                    FeedbackReporter.Channel.CLIPBOARD -> showFeedbackCopiedDialog(body)
                 }
-                dialog.dismiss()
             }
             dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener {
                 val draft = collectFeedbackDraft(chips, etDetail, etContact, cbInfo, tvInfo)
                     ?: return@setOnClickListener
-                FeedbackReporter.copyToClipboard(
-                    this,
-                    FeedbackReporter.subjectOf(this, draft) + "\n\n" +
-                        FeedbackReporter.buildBody(this, draft)
-                )
+                val body = feedbackFullText(draft)
+                FeedbackReporter.copyToClipboard(this, body)
                 FeedbackReporter.toastCopied(this)
                 dialog.dismiss()
+                showFeedbackCopiedDialog(body)
             }
         }
         dialog.show()
@@ -1713,6 +1713,36 @@ class MainActivity : AppCompatActivity() {
 
     private fun selectFeedbackType(chips: List<TextView>, selected: Int) {
         chips.forEachIndexed { index, chip -> chip.isSelected = index == selected }
+    }
+
+    /** 反馈全文（复制与兜底展示共用）：主题 + 正文 */
+    private fun feedbackFullText(draft: FeedbackReporter.Draft): String =
+        FeedbackReporter.subjectOf(this, draft) + "\n\n" + FeedbackReporter.buildBody(this, draft)
+
+    /**
+     * 剪贴板兜底页：本机没有邮件/分享应用时，或用户主动点了「复制」时展示。
+     * 关键是把"发到哪个邮箱"和完整内容都摆出来，不让用户回头猜往哪发。
+     */
+    private fun showFeedbackCopiedDialog(body: String) {
+        val mail = FeedbackReporter.FEEDBACK_EMAIL.trim()
+        val message = if (mail.isEmpty()) {
+            getString(R.string.feedback_copied_message_no_target)
+        } else {
+            getString(R.string.feedback_copied_message, mail)
+        }
+        val content = layoutInflater.inflate(R.layout.dialog_legal_document, null)
+        content.findViewById<TextView>(R.id.tvLegalDocument).text =
+            getString(R.string.feedback_copied_body_hint) + "\n\n" + body
+        AlertDialog.Builder(this)
+            .setTitle(R.string.feedback_copied_title)
+            .setMessage(message)
+            .setView(content)
+            .setPositiveButton(android.R.string.ok, null)
+            .setNegativeButton(R.string.feedback_copy_again) { _, _ ->
+                FeedbackReporter.copyToClipboard(this, body)
+                FeedbackReporter.toastCopied(this)
+            }
+            .show()
     }
 
     /** 收集输入；内容为空时提示并返回 null（对话框不关闭） */

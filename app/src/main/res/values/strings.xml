@@ -41,6 +41,11 @@
     <string name="feedback_share_title">选择发送反馈的方式</string>
     <string name="feedback_copy">复制</string>
     <string name="feedback_copy_done">反馈内容已复制，粘贴给我们即可</string>
+    <string name="feedback_copied_title">反馈内容已复制</string>
+    <string name="feedback_copied_message">这台设备上没找到可用的邮件或分享应用。\n内容已经复制到剪贴板，粘贴到微信 / QQ / 便签里发给我们即可：\n%1$s</string>
+    <string name="feedback_copied_message_no_target">这台设备上没找到可用的邮件或分享应用。\n内容已经复制到剪贴板，粘贴到任意聊天或笔记里发给我们即可。</string>
+    <string name="feedback_copied_body_hint">下面是完整反馈内容（可长按选择 / 手动修改后再发）：</string>
+    <string name="feedback_copy_again">再复制一次</string>
     <string name="feedback_need_detail">请先填写反馈内容</string>
     <string name="feedback_mail_opened">已为你打开邮件应用，点「发送」即可</string>
     <string name="feedback_share_opened">已打开分享面板，选一个应用发给我们</string>
